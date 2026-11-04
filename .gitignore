@@ -12,6 +12,12 @@ out/
 # Environment & Local configurations (개인정보 및 민감 정보 보호)
 .env
 .env*.local
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+.vercel/
 .env.development.local
 .env.test.local
 .env.production.local

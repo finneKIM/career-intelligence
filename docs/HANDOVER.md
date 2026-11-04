@@ -6,28 +6,42 @@
 
 ## 📅 최근 작업 일시: 2026-11-04
 
-### 1. 오늘 완료한 작업
-- **Phase 3-3단계: 3단계 지능형 매칭 엔진 (직접/간접/Evidence Gap 분석) 완성 (`src/features/matching/`)**:
-  - 3단계 정밀 매칭 알고리즘(`matchingEngine.ts`), 불용어 필터링, Vitest 11개 통과, 팝업 리포트 UI(`MatchingReportModal.tsx`) 연동 및 불변 스냅샷 영속화 완료.
-- **Phase 4: GitHub 연동 & 개인정보(PII) 보호 조치 착수**:
-  1. **Git 로컬 저장소 초기화**: `git init` 수행 및 기본 브랜치를 `main`으로 설정.
-  2. **개인정보 보호 강화 `.gitignore` 재구축**:
-     - 환경변수 파일(`.env*`), 빌드 산출물(`dist/`, `build/`), OS/에디터 파일(`.vscode/`, `.DS_Store`), 임시 캐시(`*.tsbuildinfo`), 로그 파일 차단.
-  3. **문서 내 로컬 개인 식별 절대 경로 전수 정제**:
-     - `DEV_PLAN.md` 등에 포함되어 있던 로컬 PC 경로(`C:/Users/<사용자>/...`)를 모두 상대 경로(`docs/PRD.md` 등)로 정제하여 사용자 PC 식별 정보 노출 원천 차단.
-  4. **개발 로드맵 반영**:
-     - [DEV_PLAN.md](DEV_PLAN.md)에 `Phase 4: GitHub 연동 & 개인정보(PII) 완전 삭제 및 안전 업로드` 단계를 정식 신설.
+### 1. 오늘 진행한 작업
+- Phase 3-5 (Career Explorer) 검증 완료
+- **3-6 노션 동적 스키마 어댑터**: CSV / 노션 API 응답 JSON / 객체 배열 자동 판별, 컬럼 감지, 1:1 매핑 추천·검증, 프로젝트 변환 (`src/features/notion/`)
+- **3-7 JSON 백업/복원**: 6개 테이블 전체, 병합/전체 교체, 단일 트랜잭션, 노션 키 제외 (`src/features/backup/`)
+- **3-8 LLM 분석 + 노션 실시간 연동** (Vercel 서버리스)
+  - `server/`(공통 코어) + `api/llm|notion|health`(얇은 래퍼), 개발 서버(`vite.config.ts`)에서도 같은 핸들러 동작
+  - AI 3종: 공고 구조화 보강 / 매칭 심층 분석 / 성과 문장 다듬기 (`src/features/ai/`)
+  - 노션: 사용자 내부 토큰을 요청 때만 프록시 경유 (서버 미저장)
+- 보안: `.gitignore` 강화(`.env.*`, `*.pem`, `*.key`, `secrets/`), `.env.example` 추가, `DEPLOY.md`에 키 관리 원칙 추가
+- 문서 정합성 정리: `DEV_PLAN.md`(3-8 단계·환경 변수·저장 구조), `PRD.md`·`ARCHITECTURE.md`(프라이버시·토큰 문구)
 
 ### 2. 현재 상태 (Current State)
-- **Phase 3-1, 3-2, 3-3단계 완료**: 커리어 자산 관리, 채용공고 파싱, 3단계 매칭 엔진 완성
-- **Phase 4 진행 준비 완료**: Git 로컬 초기화 및 개인정보 보호 조치 완료, 사용자의 GitHub 원격 저장소 URL 연결 대기 중
+- **Phase 3 1~7단계 완료, 8단계는 코드 완료 / 실환경 검증 대기**
+- Vitest **49개** 통과, `npm run build` 통과
+- 브라우저 수동 확인은 **아직 안 함** (UI 전체)
+- **3-4 ~ 3-8 변경분이 모두 미커밋 상태.** 원격 푸시도 안 함 (`origin` 등록만 됨, 사용자 지시 대기)
+- 개발 서버 `/api/health`·가드(405/403/400)는 실제로 확인함
 
-### 3. 다음 진행할 작업 (Next Steps)
-1. 사용자가 제공하는 GitHub 원격 저장소 URL(`https://github.com/...`)을 `git remote add origin`으로 연결
-2. 개인 식별 정보 및 민감 키 전수 재검사 확인 후 첫 번째 안전 커밋(`Initial commit: Career Intelligence MVP`) 및 푸시
-3. 완료 후 원래 계획된 기능인 **Phase 3-4단계: 지원 이력 트래커** 개발 재개
+### 3. 미검증 항목 (반드시 확인)
+1. **Gemini 실제 호출**: 기본 모델명 `gemini-2.5-flash` 호출이 404를 반환함 → 유효한 모델명을 `GEMINI_MODEL`로 지정 후 응답 형식 확인. 서버 코드는 가짜 응답으로만 테스트됨
+2. **노션 실제 연동**: 실제 DB 1회 시험 필요 (기본 `Notion-Version: 2022-06-28`)
+3. **Vercel 배포 환경**: 환경 변수 등록(`GEMINI_API_KEY`, 권장 `APP_ACCESS_CODE`) 후 동작 확인. 레이트 리밋은 인스턴스별 best-effort라 접근 코드가 실질 방어선
+
+### 4. 주의사항
+- 개발 서버(Vite)는 **OS 환경 변수**(예: 셸에 설정된 `GEMINI_API_KEY`)도 서버 핸들러에서 읽음. 이 환경에서는 `GEMINI_API_KEY`가 이미 설정되어 있어, 개발 서버로 LLM 경로를 호출하면 실제 Gemini 호출이 발생함
+- 비밀 값은 GitHub에 올리지 않음. `VITE_` 접두사에 비밀 값 금지
+- 무료 Gemini 티어는 입력이 서비스 개선에 쓰일 수 있음 → UI에서 동의 체크 후에만 AI 동작
+
+### 5. 다음 진행할 작업 (Next Steps)
+1. 3-8 실환경 검증(위 3번) 및 `GEMINI_MODEL` 확정
+2. 개발 서버에서 UI 수동 확인 (설정 탭: 백업 복원 / 노션 가져오기 / AI, 공고 등록 AI 버튼, 매칭 리포트 AI 분석, 성과 다듬기)
+3. 커밋 및 사용자 요청 시 `git push -u origin main`
+4. 대시보드 탭은 요약 placeholder 수준 (기능 확장 후보)
 
 ---
 
 ### ❓ [확인이 필요한 질문 목록]
-1. 깃허브 원격 저장소 연결을 위해, 연결하실 **GitHub 레포지토리 주소(예: `https://github.com/finneKIM/career-intelligence.git`)**를 알려주시면 즉시 연결을 설정하겠습니다!
+1. 3-4 ~ 3-8 변경분을 커밋할까요? (원격 푸시는 별도 지시 전까지 하지 않음)
+2. 사용할 Gemini 모델명을 알려주시면 `GEMINI_MODEL`로 지정해 실제 호출을 확인합니다. (개발 중 실제 키 호출이 발생해도 괜찮은지도 함께 확인 필요)

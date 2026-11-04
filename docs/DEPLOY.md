@@ -18,3 +18,27 @@
 | 버전 | 배포일자 | 주요 변경 내용 | 비고 |
 | :--- | :--- | :--- | :--- |
 | v0.0.1 | 2026-11-02 | 문서 구조 및 프로젝트 셋업 완료 | 초기 준비 |
+
+
+---
+
+## API 키 / 비밀 값 관리 원칙
+
+- **GitHub에는 키를 절대 올리지 않습니다.** `.env`, `.env.*`(단 `.env.example` 제외), `*.pem`, `*.key`, `secrets/`는 `.gitignore`로 차단됩니다.
+- **로컬 개발**: `.env.example`을 `.env.local`로 복사해 값을 입력합니다. (`.env.local`은 git 추적 제외)
+- **Vercel 배포**: Vercel 대시보드 → Project → Settings → Environment Variables에 직접 입력합니다. 저장소에는 값이 남지 않습니다.
+- **`VITE_` 접두사 금지(비밀 키)**: `VITE_` 변수는 빌드된 JS 번들에 포함되어 방문자에게 노출됩니다. 비밀 키는 접두사 없이 이름을 짓고 Vercel 서버리스 함수(`/api/*`)에서만 읽습니다.
+- **커밋 전 점검**: `git diff --cached`로 키 문자열이 없는지 확인합니다. 실수로 커밋/푸시한 키는 삭제가 아니라 **즉시 폐기(재발급)** 해야 합니다 (git 이력에 남기 때문).
+- 노션 토큰 등 사용자 입력 키는 백업 JSON에서도 제외됩니다 (`backupService.ts`).
+
+### 서버리스 API (LLM · 노션)
+
+| 경로 | 역할 | 필요한 서버 환경 변수 |
+| :--- | :--- | :--- |
+| `/api/llm` | Gemini 호출 (공고 구조화 / 매칭 분석 / 문장 다듬기) | `GEMINI_API_KEY`, 권장 `APP_ACCESS_CODE`, 선택 `GEMINI_MODEL` |
+| `/api/notion` | 노션 API 프록시 (사용자 토큰은 요청 본문으로만 전달, 미저장) | 없음 |
+| `/api/health` | AI 사용 가능 여부 확인 | 없음 |
+
+- 로컬 개발: `npm run dev`가 같은 핸들러로 `/api/*`를 처리합니다. 값은 `.env.local`에 넣습니다.
+- **주의**: Vite는 셸 환경 변수(OS에 이미 설정된 `GEMINI_API_KEY` 등)도 서버 핸들러에서 읽습니다.
+- 레이트 리밋은 서버리스 인스턴스별 best-effort입니다. 남용 방지의 핵심은 `APP_ACCESS_CODE`이며, 배포 시 반드시 설정하세요.

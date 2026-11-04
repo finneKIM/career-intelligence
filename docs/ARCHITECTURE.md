@@ -8,7 +8,8 @@
 
 - **아키텍처 패턴**: **Local-First 4-Layer Architecture (로컬 퍼스트 4계층 아키텍처)**
 - **핵심 설계 철학**:
-  - **프라이버시 중심 (Privacy-First)**: 구직자의 민감한 이력서, 자소서, 프로젝트 정보가 외부 중앙 서버에 저장되지 않고 사용자 브라우저(IndexedDB)에 안전하게 격리 보관됩니다.
+  - **프라이버시 중심 (Privacy-First)**: 구직자의 이력서, 자소서, 프로젝트 정보는 외부 중앙 서버에 **저장되지 않고** 사용자 브라우저(IndexedDB)에 격리 보관됩니다. AI 분석·노션 불러오기 실행 시에만 필요한 최소 내용이 **무상태(stateless) 서버리스 함수**를 거쳐 외부로 전달됩니다(저장·로그 없음, 사용자 동의 후).
+  - **비밀 값 분리 (Secret Isolation)**: 운영 API 키는 서버 환경 변수 전용이며, 사용자 노션 토큰은 브라우저 보관 + 요청 시 중계만 합니다.
   - **어댑터 기반 확장성 (Adapter-Driven Extensibility)**: 로컬 저장소와 외부 데이터(예: 노션, 추후 링크드인 등)의 형식을 추상화하여, 새로운 데이터 소스가 추가되어도 UI나 매칭 로직이 영향을 받지 않는 구조를 유지합니다.
   - **불변 스냅샷 보존 (Immutable Snapshot)**: 지원 시점의 공고 원문과 제출 서류, 분석 결과는 최신 프로필 변경과 독립적으로 영구 보존됩니다.
 
@@ -32,6 +33,12 @@ flowchart TD
         JDParser["JD 텍스트 구조화 파서 (Fail-Safe 지원)"]
         SnapshotService["지원 이력 & 불변 스냅샷 생성기"]
         ExplorerEngine["Role(4종) × Domain(4종) 매트릭스 계산기"]
+    end
+
+    subgraph Serverless ["2-1. 서버리스 중계 계층 (Vercel Functions, 무상태)"]
+        ApiLlm["/api/llm : Gemini 호출 · 프롬프트 구성 · 응답 검증"]
+        ApiNotion["/api/notion : 노션 API 프록시 (호스트 고정)"]
+        Guard["공통 가드: 출처 검사 · 크기 제한 · 레이트 리밋 · 접근 코드"]
     end
 
     subgraph Adapter ["3. 데이터 어댑터 계층 (Data Adapter / Repository Layer)"]
@@ -181,8 +188,11 @@ export interface NotionSchemaDiscovery {
 export interface NotionMappingConfig {
   id: string; // 'current-notion-config'
   sourceType: 'API' | 'CSV' | 'JSON';
+  // 참고: 현재 구현은 토큰을 이 레코드(IndexedDB)에 저장하지 않는다.
+  // 토큰·DB ID는 localStorage('ci.notion.credentials', "기억하기" 선택 시)에만 보관하고,
+  // 백업 JSON에는 apiKey를 항상 빈 값으로 내보낸다. (아래 필드는 하위 호환용)
   apiConfig?: {
-    apiKey: string; // 노션 내부 통합 토큰 (Internal Integration Secret)
+    apiKey: string; // 현재 미사용(항상 빈 값). 노션 내부 통합 토큰은 저장하지 않음
     databaseId: string;
   };
   columnMappings: {
@@ -203,42 +213,48 @@ export interface NotionMappingConfig {
 
 ```text
 src/
-├── assets/                  # 이미지, 아이콘 및 스타일 리소스
-├── components/              # 공통 UI 컴포넌트
-│   ├── common/              # Button, Input, Modal, Badge, Card 등
-│   └── layout/              # Header, Navigation, Footer, Layout Shell
-├── db/                      # IndexedDB 및 Dexie 인스턴스
-│   ├── index.ts             # Dexie DB 클래스 정의 (CareerIntelDB)
-│   └── schema.ts            # 테이블 스키마 및 마이그레이션 정의
-├── features/                # 도메인 중심 기능 모듈
-│   ├── dashboard/           # 대시보드 홈 (요약 & 퀵 분석)
-│   ├── profile/             # 프로필 & 프로젝트 자산 관리
-│   ├── jd-analysis/         # JD 파서, 매칭 엔진, Gap 분석 리포트
-│   ├── tracker/             # 지원 현황 칸반 보드 & 스냅샷 모달
-│   ├── explorer/            # 직무(4종) × 도메인(4종) 교차 탐색 매트릭스
-│   └── notion-sync/         # 노션 스마트 CSV/JSON 파서 및 어댑터
-├── services/                # 비즈니스 로직 및 통합 저장소 관리
-│   ├── matchingEngine.ts    # 3단계 매칭 알고리즘
-│   ├── jdParserService.ts   # 정규표현식 및 규칙 기반 JD 파서
-│   └── backupService.ts     # JSON 내보내기/가져오기
-├── types/                   # TypeScript 타입 및 인터페이스
-│   ├── profile.ts
-│   ├── application.ts
-│   ├── analysis.ts
-│   └── notion.ts
-├── utils/                   # 순수 유틸 함수 (날짜, 텍스트 전처리 등)
-├── App.tsx                  # 라우팅 및 전역 상태 프로바이더
-└── main.tsx                 # 앱 진입점
+├── db/
+│   └── index.ts                 # Dexie DB 클래스(CareerIntelDB), 기본 프로필·샘플 시딩 헬퍼
+├── features/                    # 도메인 중심 기능 모듈 (각 폴더는 index.ts로 공개)
+│   ├── profile/                 # 프로필 & 프로젝트 자산 (ProfileView, ProjectModal, ProjectCard …)
+│   ├── jd-analysis/             # 공고 등록·목록·상세 (jdParserService.ts: 정규식 파서)
+│   ├── matching/                # matchingEngine.ts (3단계 매칭) + MatchingReportModal
+│   ├── applications/            # 지원 트래커: 칸반, 불변 스냅샷 모달, applicationHelper.ts
+│   ├── explorer/                # explorerEngine.ts + 4×4 매트릭스 UI
+│   ├── notion/                  # notionAdapter.ts(스키마 감지·매핑·변환) + NotionAdapterPanel
+│   ├── backup/                  # backupService.ts(내보내기·검증·복원) + BackupPanel
+│   └── ai/                      # aiClient.ts(/api 호출·동의·접근 코드), AiAssist(버튼 3종), AiSettingsPanel
+├── types/                       # profile.ts · analysis.ts · application.ts · notion.ts
+├── App.tsx                      # 탭 기반 셸 (useState, URL 라우팅 없음)
+├── main.tsx
+└── index.css
+
+api/                             # Vercel 서버리스 함수 (얇은 래퍼)
+├── llm.ts · notion.ts · health.ts
+server/                          # 서버 공통 코어 (프레임워크 독립, 단위 테스트 대상)
+├── http.ts                      # 요청 가드(출처·크기·접근 코드), 레이트 리미터
+├── prompts.ts                   # 프롬프트 생성(인젝션 완화), 응답 검증(수치 날조 차단)
+├── llmHandler.ts                # Gemini 호출 (키는 서버 환경 변수에서만 읽음)
+├── notionHandler.ts             # 노션 프록시 (토큰·ID 형식 검증, 호스트 고정)
+└── nodeAdapter.ts               # Node 요청 ↔ 코어 변환 (Vercel · Vite 개발 서버 공용)
+
+tests/                           # Vitest: db · jdParser · matchingEngine · applications · explorer
+                                 #         notionAdapter · backup · server  (총 49개)
+vite.config.ts                   # 개발 서버에서 /api/* 를 위 server/ 핸들러로 처리
 ```
+
+> 위 트리는 **현재 구현 기준**입니다(2026-11-04). 초기 설계안에 있던 `components/`, `services/`, `utils/`, `dashboard/`, 별도 `schema.ts`는 만들지 않았고, 서비스 로직은 각 `features/` 폴더 안에 함께 둡니다. 대시보드는 아직 `App.tsx` 내부의 요약 화면입니다.
 
 ---
 
 ## 5. 데이터 흐름 및 상태 관리
 
-1. **상태 관리 방식**: React 내장 Context API 및 커스텀 훅(`useProfile`, `useApplications`, `useAnalysis`)을 통해 가볍고 명확하게 전역 상태를 구독합니다.
-2. **반응형 데이터 갱신**: Dexie.js의 `useLiveQuery`를 활용하여 DB가 변경되면 별도의 수동 새로고침 없이 화면 UI가 즉각 자동으로 업데이트됩니다.
-3. **노션 데이터 유입 흐름**:
-   - `노션 내보내기 파일(.csv)` 업로드 ➔ `notion-sync` 모듈이 헤더 자동 인식 ➔ `Project` 형식으로 변환 ➔ `IndexedDB`에 안전하게 일괄 저장 ➔ 즉시 화면에 프로젝트 자산으로 반영.
+1. **상태 관리 방식**: 현재는 `App.tsx`의 `useState`와 각 뷰의 로컬 상태 + Dexie 조회로 구성합니다. (초기 설계의 Context/커스텀 훅은 규모가 커질 때 도입 예정)
+2. **데이터 갱신**: 저장·복원·가져오기 후 각 뷰가 `onDataRefresh`/`loadData` 콜백으로 DB를 다시 읽어 화면을 갱신합니다. (`useLiveQuery` 기반 자동 갱신은 미도입)
+3. **노션 데이터 유입 흐름** (두 채널):
+   - 파일/붙여넣기: `CSV·JSON` ➔ `notion` 모듈이 헤더 자동 인식 ➔ 매핑 추천·사용자 확인 ➔ `Project` 변환 ➔ `IndexedDB` 일괄 저장.
+   - 실시간: 브라우저(토큰·DB ID 입력) ➔ `/api/notion`(검증 후 노션 API 중계, 미저장) ➔ 응답 JSON ➔ 위와 동일한 파서·매핑 흐름.
+4. **AI 분석 흐름** (사용자가 버튼을 눌렀을 때만, 동의 후): 브라우저가 필요한 최소 데이터 구성(이름 제외) ➔ `/api/llm`(가드 통과 → 프롬프트 구성 → Gemini 호출) ➔ 서버가 JSON 응답을 검증(스키마, 입력에 없던 요구사항·수치 제거) ➔ UI 표시. **AI 결과는 참고용이며 DB·분석 스냅샷에 저장하지 않고 객관적 충족도 점수를 바꾸지 않는다.**
 
 ---
 
@@ -248,5 +264,7 @@ src/
 - **단위 테스트 (Unit Test)**:
   - `matchingEngine.test.ts`: 키워드 과장 없이 직접/간접/Gap이 올바르게 분류되는지 검증.
   - `jdParser.test.ts`: 다양한 형식의 채용공고 텍스트에서 주요업무, 자격요건, 우대사항이 정확히 파싱되는지 검증.
-  - `notionParser.test.ts`: 노션 CSV 내보내기 파일이 정상적으로 데이터 모델로 변환되는지 검증.
+  - `notionAdapter.test.ts`: 노션 CSV/API JSON 스키마 감지, 매핑 추천·검증, 프로젝트 변환 검증.
+  - `backup.test.ts`: 백업 왕복, 형식 검증, 구버전 호환, 노션 키 제외 검증.
+  - `server.test.ts`: 요청 가드, 레이트 리밋, Gemini·노션 호출(모킹), 프롬프트 안전장치, 응답 검증 (실제 외부 호출 없음).
 - **회귀 방지**: 비즈니스 로직을 변경할 때마다 테스트 스위트를 자동 실행하여 기존 분석 결과가 왜곡되지 않도록 보장.
