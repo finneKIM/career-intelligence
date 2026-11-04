@@ -10,6 +10,7 @@ import {
   ClipboardCheck
 } from 'lucide-react';
 import { parseJobDescription } from './jdParserService';
+import { AiJdParseButton, type ParsedJdResult } from '../ai';
 import { db } from '../../db';
 import type { JobDescription } from '../../types';
 
@@ -45,6 +46,7 @@ export function JdInputModal({ isOpen, onClose, onSuccess }: JdInputModalProps) 
   const [showRawTextarea, setShowRawTextarea] = useState(true);
   const [urlFetchWarning, setUrlFetchWarning] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [aiParsed, setAiParsed] = useState<ParsedJdResult | null>(null);
 
   if (!isOpen) return null;
 
@@ -91,6 +93,15 @@ export function JdInputModal({ isOpen, onClose, onSuccess }: JdInputModalProps) 
         domain: domain.trim(),
         sourceUrl: sourceUrl.trim(),
       });
+
+      // AI 구조화 결과가 있으면 정규식 결과 대신 사용 (원문 rawText는 그대로 보존)
+      if (aiParsed) {
+        parsedJd.sections = {
+          responsibilities: aiParsed.responsibilities,
+          qualifications: aiParsed.qualifications,
+          preferred: aiParsed.preferred,
+        };
+      }
 
       // IndexedDB에 안전하게 영구 저장
       await db.jobDescriptions.add(parsedJd);
@@ -202,11 +213,29 @@ export function JdInputModal({ isOpen, onClose, onSuccess }: JdInputModalProps) 
                 <textarea
                   rows={8}
                   value={rawText}
-                  onChange={(e) => setRawText(e.target.value)}
+                  onChange={(e) => {
+                    setRawText(e.target.value);
+                    setAiParsed(null);
+                  }}
                   placeholder={`채용 공고의 [주요 업무], [자격 요건], [우대 사항] 전체를 그대로 복사하여 붙여넣으세요.\n\n예시:\n[주요 업무]\n• AI 모델 학습 및 서빙 파이프라인 개발\n\n[자격 요건]\n• Python 및 PyTorch 실무 경험\n\n[우대 사항]\n• 관련 논문 게재 경험`}
                   className="w-full p-3 text-xs font-mono border border-slate-200 rounded-xl focus:outline-hidden focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 leading-relaxed"
                   required
                 />
+                <div className="flex flex-wrap items-center gap-3">
+                  <AiJdParseButton
+                    rawText={rawText}
+                    onResult={(r) => {
+                      setAiParsed(r);
+                      if (r.company && !company.trim()) setCompany(r.company);
+                      if (r.role && !role.trim()) setRole(r.role);
+                    }}
+                  />
+                  {aiParsed && (
+                    <span className="text-[11px] text-violet-600">
+                      AI 구조화 적용됨 (업무 {aiParsed.responsibilities.length} · 자격 {aiParsed.qualifications.length} · 우대 {aiParsed.preferred.length})
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-slate-500">
                   💡 파서가 텍스트 안의 헤더([주요 업무], [자격 요건] 등)와 불릿 기호(•, -, 1.)를 감지하여 항목별로 자동 정제합니다.
                 </p>

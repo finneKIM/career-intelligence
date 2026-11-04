@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { AiPolishButton } from '../ai';
 import { X, Plus, Trash2, FolderPlus, Link as LinkIcon, Sparkles } from 'lucide-react';
 import type { Project, ProjectLink } from '../../types';
 
@@ -331,6 +332,7 @@ export function ProjectModal({ isOpen, projectToEdit, onClose, onSave }: Project
                     placeholder="예: ONNX Runtime 양자화로 추론 지연시간 35% 단축 (120ms ➔ 78ms)"
                     className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
+                  <AiPolishButton text={outcome} onPick={(t) => handleOutcomeChange(idx, t)} />
                   <button
                     type="button"
                     onClick={() => handleRemoveOutcomeRow(idx)}

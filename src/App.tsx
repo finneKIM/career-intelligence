@@ -9,13 +9,17 @@ import {
   Settings as SettingsIcon,
   Database,
   RefreshCw,
-  Download,
   ArrowRight
 } from 'lucide-react';
 import { db, getOrCreateDefaultProfile, seedSampleProjectsIfEmpty } from './db';
 import type { Profile, Project } from './types';
 import { ProfileView } from './features/profile/ProfileView';
 import { JdAnalysisView } from './features/jd-analysis';
+import { ApplicationTrackerView } from './features/applications';
+import { CareerExplorerView } from './features/explorer';
+import { BackupPanel } from './features/backup';
+import { NotionAdapterPanel } from './features/notion';
+import { AiSettingsPanel } from './features/ai';
 
 export type TabType = 'dashboard' | 'profile' | 'jd' | 'tracker' | 'explorer' | 'settings';
 
@@ -216,39 +220,17 @@ export default function App() {
           <JdAnalysisView />
         )}
 
-        {/* 탭 4: 지원 트래커 (Phase 3-4 구현 대기) */}
+        {/* 탭 4: 지원 트래커 (Phase 3-4 완성) */}
         {activeTab === 'tracker' && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm space-y-3">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
-              <KanbanSquare className="w-8 h-8" />
-            </div>
-            <h3 className="text-base font-bold text-slate-900">📋 지원 이력 트래커 & 불변 스냅샷 보존</h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              5단계 칸반 보드 및 지원 당시의 공고 원문과 제출 서류를 영구 보존하는 스냅샷 기능입니다.
-            </p>
-            <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
-              <span>Phase 3-4에서 구현 예정</span>
-            </div>
-          </div>
+          <ApplicationTrackerView />
         )}
 
-        {/* 탭 5: Career Explorer (Phase 3-5 구현 대기) */}
+        {/* 탭 5: Career Explorer (Phase 3-5 완성) */}
         {activeTab === 'explorer' && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm space-y-3">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
-              <Compass className="w-8 h-8" />
-            </div>
-            <h3 className="text-base font-bold text-slate-900">🧭 Career Explorer (인접 직무 × 도메인 매트릭스)</h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              보유 기술 스택을 바탕으로 4개 직무 × 4개 도메인의 적합도를 진단하고 학습 로드맵을 제안합니다.
-            </p>
-            <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
-              <span>Phase 3-5에서 구현 예정</span>
-            </div>
-          </div>
+          <CareerExplorerView />
         )}
 
-        {/* 탭 6: 설정 & 노션 동적 연동 & 백업 (Phase 3-6 / 3-7 구현 대기) */}
+        {/* 탭 6: 설정 & 노션 동적 연동 & 백업 (Phase 3-6 / 3-7 완성) */}
         {activeTab === 'settings' && (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm space-y-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
@@ -259,48 +241,11 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* 백업 & 복원 박스 */}
-              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">💾 로컬 퍼스트 데이터 관리</h4>
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const exportData = {
-                        profile,
-                        projects,
-                        exportedAt: new Date().toISOString(),
-                        version: '1.0'
-                      };
-                      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `career-intel-backup-${new Date().toISOString().slice(0, 10)}.json`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>전체 데이터 JSON 백업 다운로드</span>
-                  </button>
-                  <p className="text-[11px] text-slate-400 text-center">
-                    브라우저 캐시 삭제 시에도 이 파일로 즉시 100% 복원할 수 있습니다.
-                  </p>
-                </div>
-              </div>
+              <BackupPanel onRestored={loadData} />
 
-              {/* 노션 연동 박스 */}
-              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">🔗 노션 동적 스키마 어댑터</h4>
-                <p className="text-xs text-slate-500">
-                  사용자의 노션 데이터베이스 컬럼을 자동 감지하여 1:1로 맞춤 매핑합니다.
-                </p>
-                <div className="p-4 bg-white rounded-xl border border-slate-200 text-center text-xs text-slate-400">
-                  Phase 3-6에서 상세 어댑터 제공 예정
-                </div>
-              </div>
+              <NotionAdapterPanel onImported={loadData} />
+
+              <AiSettingsPanel />
             </div>
           </div>
         )}

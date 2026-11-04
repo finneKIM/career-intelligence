@@ -12,6 +12,7 @@ import {
   FileText
 } from 'lucide-react';
 import type { JobDescription, AnalysisResult } from '../../types';
+import { AiMatchInsight } from '../ai';
 
 interface MatchingReportModalProps {
   isOpen: boolean;
@@ -281,6 +282,8 @@ export function MatchingReportModal({ isOpen, onClose, jd, result }: MatchingRep
               </div>
             )}
           </div>
+          {/* AI 심층 분석 (선택 기능) */}
+          <AiMatchInsight jd={jd} />
         </div>
 
         {/* 모달 푸터 */}
