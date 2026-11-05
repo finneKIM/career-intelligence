@@ -26,6 +26,8 @@
   - **2026-11-05 전체 커밋 완료** (로컬 `main`, 미커밋 파일 없음). 해시는 이력 재작성 때마다 바뀌므로 `git log`로 확인할 것
   - **이력 재작성 2회**: ① 커밋 작성자·커밋자 이메일을 GitHub noreply 주소로 교체하고 첫 커밋 문서 속 로컬 경로 문구를 제거. ② 실존 기업명(와이어프레임·샘플 데이터·옛 목업 포함)을 가상 이름으로, `AGENTS.md`의 사용자 수준 서술을 중립 문구로 과거 커밋까지 치환. ②는 재작성 전후 **최종 파일 트리 해시가 동일**함을 확인(1차 시도에서는 기록 문장 한 줄이 함께 치환되어 해시가 달랐고, 그 한 줄만 고침). 이력 전체 검색에서 옛 이메일·로컬 경로·실존 기업명·옛 문구·키 패턴 0건. 이 저장소의 `git config user.email`도 noreply
   - **로컬 백업 존재 (푸시 금지)**: 브랜치 `backup/pre-rewrite2-20261105`와 `refs/original/`에 재작성 전 내용(실존 기업명, "개발 입문자" 문구 포함)이 남아 있음. 푸시는 `main`만(`git push --all`·`--mirror` 금지). 푸시·업로드 확인이 끝나면 사용자 승인 후 삭제(`git branch -D`, `refs/original` 삭제, `git reflog expire --expire=now --all`, `git gc --prune=now`). 1차 백업은 이미 삭제함
+  - **개인 데이터 보호**: 저장소에는 노션 가져오기 데이터·공고·백업 파일이 없음(사용자 데이터는 브라우저 IndexedDB에만 있고, 저는 그 내용을 읽을 수 없음). `.gitignore`가 `career-intel-backup-*.json`·`*.csv`·노션 내보내기 등을 차단하지만, 규칙에 안 맞는 이름이나 이미 추적 중인 파일은 못 막으므로 백업·내보내기 파일은 프로젝트 폴더 밖에 보관할 것
+  - **푸시 직전 목록(2026-11-05)**: 현재 파일 95개 + 이력에만 남은 삭제 파일 9개(위 Next.js 잔여 파일, `temp.md`)도 공개됨. 정리 후보(개인정보 아님, 미처리): 중복 설정 `postcss.config.mjs`, `pnpm-workspace.yaml`, `public/` 템플릿 이미지 9개
   - 잔여 Next.js 파일(`app/`, `components/`, `lib/`, `next.config.mjs`, `pnpm-lock.yaml`, `components.json`)과 `temp.md` 삭제. `src/App.tsx`의 `temp.md` 언급 주석은 `docs/UI_UX.md` 기준으로 고침
   - **원격 푸시 안 함** (`origin` 등록만 됨, 사용자 지시 대기)
 
