@@ -13,8 +13,11 @@ export function normalizeDatabaseId(input: string): string | null {
 const TOKEN_RE = /^(secret_|ntn_)[A-Za-z0-9_]{20,200}$/;
 
 /**
- * 노션 프록시: 사용자가 보낸 토큰으로 노션 API를 대신 호출만 하고, 토큰은 저장·기록하지 않는다.
- * 호스트(api.notion.com)와 경로는 서버에서 고정하므로 임의 URL 호출(SSRF)이 불가능하다.
+ * 노션 프록시: 방문자가 보낸 본인의 통합 토큰으로 노션 API를 대신 호출만 한다.
+ *  - 토큰은 저장·기록하지 않고 응답/오류 메시지에도 싣지 않는다.
+ *  - 서버에는 운영자의 노션 토큰이 없다(방문자마다 계정·DB가 다르므로).
+ *  - 호스트(api.notion.com)와 경로는 서버에서 고정하므로 임의 URL 호출(SSRF)이 불가능하다.
+ *  - 접근 코드는 요구하지 않는다(공개 서비스). 남용은 출처 검사·크기 제한·IP별 호출 제한으로 완화한다.
  */
 export async function handleNotion(req: ApiRequest, deps: HandlerDeps): Promise<ApiResponse> {
   const denied = guardRequest(req, deps.env, { requireAccessCode: false });
@@ -27,8 +30,8 @@ export async function handleNotion(req: ApiRequest, deps: HandlerDeps): Promise<
 
   const body = req.body as { token?: unknown; databaseId?: unknown } | undefined;
   const token = typeof body?.token === 'string' ? body.token.trim() : '';
-  if (!TOKEN_RE.test(token)) return json(400, { error: '노션 통합 토큰 형식이 올바르지 않습니다. (secret_… 또는 ntn_…)' });
   const dbId = typeof body?.databaseId === 'string' ? normalizeDatabaseId(body.databaseId) : null;
+  if (!TOKEN_RE.test(token)) return json(400, { error: '노션 통합 토큰 형식이 올바르지 않습니다. (secret_… 또는 ntn_…)' });
   if (!dbId) return json(400, { error: '노션 데이터베이스 ID 형식이 올바르지 않습니다.' });
 
   const headers = {

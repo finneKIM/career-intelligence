@@ -9,7 +9,7 @@
 - **아키텍처 패턴**: **Local-First 4-Layer Architecture (로컬 퍼스트 4계층 아키텍처)**
 - **핵심 설계 철학**:
   - **프라이버시 중심 (Privacy-First)**: 구직자의 이력서, 자소서, 프로젝트 정보는 외부 중앙 서버에 **저장되지 않고** 사용자 브라우저(IndexedDB)에 격리 보관됩니다. AI 분석·노션 불러오기 실행 시에만 필요한 최소 내용이 **무상태(stateless) 서버리스 함수**를 거쳐 외부로 전달됩니다(저장·로그 없음, 사용자 동의 후).
-  - **비밀 값 분리 (Secret Isolation)**: 운영 API 키는 서버 환경 변수 전용이며, 사용자 노션 토큰은 브라우저 보관 + 요청 시 중계만 합니다.
+  - **비밀 값 분리 (Secret Isolation, 방문자별 BYOK)**: 방문자마다 노션 계정·DB·Gemini 키가 다르므로 서버에는 방문자의 비밀 값을 두지 않습니다. 방문자가 입력한 Gemini 키·노션 토큰은 방문자 브라우저에만 보관(기본 `sessionStorage`, 선택 시 `localStorage`)하고 호출 때만 서버를 통과합니다. 운영자 본인의 Gemini 키(서버 환경 변수)는 접근 코드가 맞을 때만 쓰이며 공개 배포에서는 등록하지 않는 것을 권장합니다.
   - **어댑터 기반 확장성 (Adapter-Driven Extensibility)**: 로컬 저장소와 외부 데이터(예: 노션, 추후 링크드인 등)의 형식을 추상화하여, 새로운 데이터 소스가 추가되어도 UI나 매칭 로직이 영향을 받지 않는 구조를 유지합니다.
   - **불변 스냅샷 보존 (Immutable Snapshot)**: 지원 시점의 공고 원문과 제출 서류, 분석 결과는 최신 프로필 변경과 독립적으로 영구 보존됩니다.
 
@@ -189,7 +189,8 @@ export interface NotionMappingConfig {
   id: string; // 'current-notion-config'
   sourceType: 'API' | 'CSV' | 'JSON';
   // 참고: 현재 구현은 토큰을 이 레코드(IndexedDB)에 저장하지 않는다.
-  // 토큰·DB ID는 localStorage('ci.notion.credentials', "기억하기" 선택 시)에만 보관하고,
+  // 토큰·DB ID는 sessionStorage('ci.notion.credentials', 탭을 닫으면 삭제)에 두고,
+  // "계속 기억하기"를 선택한 경우에만 localStorage에 보관한다.
   // 백업 JSON에는 apiKey를 항상 빈 값으로 내보낸다. (아래 필드는 하위 호환용)
   apiConfig?: {
     apiKey: string; // 현재 미사용(항상 빈 값). 노션 내부 통합 토큰은 저장하지 않음
@@ -230,17 +231,20 @@ src/
 └── index.css
 
 api/                             # Vercel 서버리스 함수 (얇은 래퍼)
-├── llm.ts · notion.ts · health.ts
+├── llm.ts · models.ts · notion.ts · health.ts
 server/                          # 서버 공통 코어 (프레임워크 독립, 단위 테스트 대상)
 ├── http.ts                      # 요청 가드(출처·크기·접근 코드), 레이트 리미터
 ├── prompts.ts                   # 프롬프트 생성(인젝션 완화), 응답 검증(수치 날조 차단)
-├── llmHandler.ts                # Gemini 호출 (키는 서버 환경 변수에서만 읽음)
-├── notionHandler.ts             # 노션 프록시 (토큰·ID 형식 검증, 호스트 고정)
+├── gemini.ts                    # 키 결정(방문자 키/운영자 키+접근 코드), 모델 목록 조회·순위·캐시, 업스트림 오류 해석
+├── modelsHandler.ts             # /api/models: 사용 가능 모델 목록
+├── llmHandler.ts                # Gemini 호출 (방문자 키 헤더 우선, 운영자 키는 접근 코드 일치 시에만, 둘 다 없으면 거부)
+├── notionHandler.ts             # 노션 프록시 (방문자 토큰만 사용, 접근 코드 불필요, 호스트 고정)
 └── nodeAdapter.ts               # Node 요청 ↔ 코어 변환 (Vercel · Vite 개발 서버 공용)
 
 tests/                           # Vitest: db · jdParser · matchingEngine · applications · explorer
-                                 #         notionAdapter · backup · server  (총 49개)
+                                 #         notionAdapter · backup · server  (총 69개)
 vite.config.ts                   # 개발 서버에서 /api/* 를 위 server/ 핸들러로 처리
+vercel.json                      # 배포 보안 헤더 (CSP, X-Frame-Options, Referrer-Policy, HSTS, /api 캐시 금지)
 ```
 
 > 위 트리는 **현재 구현 기준**입니다(2026-11-04). 초기 설계안에 있던 `components/`, `services/`, `utils/`, `dashboard/`, 별도 `schema.ts`는 만들지 않았고, 서비스 로직은 각 `features/` 폴더 안에 함께 둡니다. 대시보드는 아직 `App.tsx` 내부의 요약 화면입니다.
@@ -254,7 +258,8 @@ vite.config.ts                   # 개발 서버에서 /api/* 를 위 server/ �
 3. **노션 데이터 유입 흐름** (두 채널):
    - 파일/붙여넣기: `CSV·JSON` ➔ `notion` 모듈이 헤더 자동 인식 ➔ 매핑 추천·사용자 확인 ➔ `Project` 변환 ➔ `IndexedDB` 일괄 저장.
    - 실시간: 브라우저(토큰·DB ID 입력) ➔ `/api/notion`(검증 후 노션 API 중계, 미저장) ➔ 응답 JSON ➔ 위와 동일한 파서·매핑 흐름.
-4. **AI 분석 흐름** (사용자가 버튼을 눌렀을 때만, 동의 후): 브라우저가 필요한 최소 데이터 구성(이름 제외) ➔ `/api/llm`(가드 통과 → 프롬프트 구성 → Gemini 호출) ➔ 서버가 JSON 응답을 검증(스키마, 입력에 없던 요구사항·수치 제거) ➔ UI 표시. **AI 결과는 참고용이며 DB·분석 스냅샷에 저장하지 않고 객관적 충족도 점수를 바꾸지 않는다.**
+4. **AI 모델 선택**: 사용자가 고른 모델 > 운영자 `GEMINI_MODEL` > 자동. 자동은 키로 `models`를 조회해 Flash 안정판 최신순으로 정렬하고(TTS·이미지 등 제외), 403/404/5xx/시간 초과면 다음 후보로 넘어간다(최대 6개, 전체 40초 예산, 시도당 15초). 실패한 모델은 같은 서버 인스턴스 메모리에서 10분간 후순위로 밀린다(서버 재시작·인스턴스 교체 시 초기화). 응답에는 사용된 `model`과 먼저 실패해 건너뛴 `attempts`가 포함된다. 사용자가 직접 고른 모델은 재시도하지 않는다.
+5. **AI 분석 흐름** (사용자가 버튼을 눌렀을 때만, 동의 후): 브라우저가 필요한 최소 데이터 구성(이름 제외) ➔ `/api/llm`(가드 통과 → 프롬프트 구성 → Gemini 호출) ➔ 서버가 JSON 응답을 검증(스키마, 입력에 없던 요구사항·수치 제거) ➔ UI 표시. **AI 결과는 참고용이며 DB·분석 스냅샷에 저장하지 않고 객관적 충족도 점수를 바꾸지 않는다.**
 
 ---
 

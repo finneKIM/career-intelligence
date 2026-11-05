@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ApiRequest, ApiResponse, FetchLike, HandlerDeps } from './http.js';
 import { handleLlm } from './llmHandler.js';
 import { handleNotion } from './notionHandler.js';
+import { handleModels } from './modelsHandler.js';
 
 /** Node 내장 fetch를 FetchLike 형태로 사용 */
 export const nodeFetch: FetchLike = (url, init) => fetch(url, init) as ReturnType<FetchLike>;
@@ -58,9 +59,16 @@ export function sendApiResponse(res: ServerResponse, out: ApiResponse): void {
 export const ROUTES: Record<string, (req: ApiRequest, deps: HandlerDeps) => Promise<ApiResponse>> = {
   '/api/llm': handleLlm,
   '/api/notion': handleNotion,
+  '/api/models': handleModels,
   '/api/health': async (_req, deps) => ({
     status: 200,
-    body: { llm: !!deps.env.GEMINI_API_KEY, accessCodeRequired: !!deps.env.APP_ACCESS_CODE },
+    body: {
+      // 서버에 운영자 Gemini 키가 있는지(접근 코드로 보호됨). 키 값은 절대 노출하지 않는다.
+      llm: !!deps.env.GEMINI_API_KEY,
+      accessCodeRequired: !!deps.env.APP_ACCESS_CODE,
+      // 방문자가 자기 Gemini 키를 입력해 쓰는 방식은 항상 가능
+      byok: true,
+    },
   }),
 };
 

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ScanSearch } from 'lucide-react';
 import { db } from '../../db';
-import { ApiError, fetchNotionDatabase, loadNotionCredentials, saveNotionCredentials } from '../ai/aiClient';
-import type { NotionColumnMappings } from '../../types';
+import { ApiError, fetchNotionDatabase, isPersisted, loadNotionCredentials, saveNotionCredentials } from '../ai/aiClient';
+import type { NotionColumnMappings, Project } from '../../types';
 import {
   mapRowsToProjects,
   parseSource,
@@ -23,6 +23,18 @@ const FIELDS: { key: FieldKey; label: string; required: boolean }[] = [
   { key: 'links', label: '링크', required: false },
 ];
 
+interface ImportSummary {
+  /** DB에서 다시 읽어 온, 이번에 저장된 프로젝트 */
+  imported: Project[];
+  /** 저장을 시도한 건수 (imported와 다르면 저장 누락) */
+  attempted: number;
+  skipped: { row: number; title: string; reason: string }[];
+  totalInDb: number;
+}
+
+const periodText = (p: Project['period']) =>
+  p.isOngoing ? `${p.startDate || '?'} ~ 현재` : p.startDate ? `${p.startDate} ~ ${p.endDate ?? p.startDate}` : '(기간 없음)';
+
 interface Props {
   onImported: () => void | Promise<void>;
 }
@@ -37,8 +49,10 @@ export function NotionAdapterPanel({ onImported }: Props) {
   const saved0 = loadNotionCredentials();
   const [token, setToken] = useState(saved0?.token ?? '');
   const [databaseId, setDatabaseId] = useState(saved0?.databaseId ?? '');
-  const [remember, setRemember] = useState(!!saved0);
+  // 기본은 이 탭을 닫으면 삭제(sessionStorage). 체크 시에만 이 브라우저에 계속 보관(localStorage).
+  const [remember, setRemember] = useState(isPersisted('notion'));
   const [liveBusy, setLiveBusy] = useState(false);
+  const [result, setResult] = useState<ImportSummary | null>(null);
 
   const handleLive = async () => {
     setError('');
@@ -46,7 +60,7 @@ export function NotionAdapterPanel({ onImported }: Props) {
     setLiveBusy(true);
     try {
       const data = await fetchNotionDatabase({ token: token.trim(), databaseId: databaseId.trim() });
-      saveNotionCredentials(remember ? { token: token.trim(), databaseId: databaseId.trim() } : null);
+      saveNotionCredentials({ token: token.trim(), databaseId: databaseId.trim() }, remember);
       const asText = JSON.stringify(data);
       setText(asText);
       await handleScan(asText);
@@ -98,6 +112,18 @@ export function NotionAdapterPanel({ onImported }: Props) {
         lastSyncedAt: new Date().toISOString(),
       });
       setMessage(`프로젝트 ${projects.length}건을 가져왔습니다. (건너뜀 ${skipped.length}건: 빈 제목·중복)`);
+      // 방금 가져온 항목을 DB에서 다시 읽어 와 "실제로 저장됐는지" 확인용으로 보여준다
+      const savedRows = await db.projects.bulkGet(projects.map((p) => p.id));
+      setResult({
+        imported: savedRows.filter((p): p is Project => !!p),
+        attempted: projects.length,
+        skipped: skipped.map((s) => ({
+          row: s.rowIndex + 1,
+          title: (source.rows[s.rowIndex]?.[mappings.title] ?? []).join(' ').trim(),
+          reason: s.reason,
+        })),
+        totalInDb: await db.projects.count(),
+      });
       await onImported();
     } catch (e) {
       setError(`가져오기 실패: ${e instanceof Error ? e.message : String(e)}`);
@@ -111,13 +137,13 @@ export function NotionAdapterPanel({ onImported }: Props) {
       <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider">🔗 노션 동적 스키마 어댑터</h4>
       <p className="text-xs text-slate-500">
         노션 DB를 CSV로 내보내거나, 노션 API 응답 JSON을 붙여넣으면 컬럼을 자동 감지해 1:1 매핑을 추천합니다.
-        (브라우저 CORS 제약과 토큰 보안을 위해 외부 호출 없이 로컬에서만 처리합니다.)
+        (붙여넣기·파일 선택은 외부 호출 없이 이 브라우저 안에서만 처리합니다. 아래 "노션에서 바로 불러오기"만 서버를 거칩니다.)
       </p>
 
       <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-2 text-xs">
         <p className="font-semibold text-slate-700">노션에서 바로 불러오기</p>
         <p className="text-slate-400">
-          노션 설정 &gt; 연결(Integrations)에서 내부 통합을 만들고, 해당 DB에 연결한 뒤 토큰과 DB ID를 입력하세요. 토큰은 이 브라우저에서만 보관되며, 요청할 때 서버가 노션에 전달만 하고 저장·기록하지 않습니다.
+          노션 설정 &gt; 연결(Integrations)에서 내부 통합을 만들고, 해당 DB에 연결한 뒤 토큰과 DB ID를 입력하세요. 토큰은 이 브라우저에서만 보관되며(기본: 탭을 닫으면 삭제), 불러올 때 이 서비스의 서버를 한 번 거쳐 노션에 전달됩니다. 서버는 저장·기록하지 않습니다. 읽기 권한만 있는 통합을 쓰세요.
         </p>
         <input
           type="password"
@@ -137,7 +163,7 @@ export function NotionAdapterPanel({ onImported }: Props) {
         <div className="flex items-center justify-between gap-2">
           <label className="flex items-center gap-1.5 text-slate-500">
             <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-            이 브라우저에 기억하기
+            이 브라우저에 계속 기억하기 (공용 PC에서는 끄세요)
           </label>
           <button
             type="button"
@@ -240,6 +266,55 @@ export function NotionAdapterPanel({ onImported }: Props) {
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{message}</span>
         </p>
+      )}
+
+      {result && (
+        <div className="space-y-2 text-xs">
+          <p className="font-semibold text-slate-700">
+            저장 확인: 시도 {result.attempted}건 → DB에서 다시 읽은 건수 {result.imported.length}건
+            {result.imported.length === result.attempted ? ' (일치)' : ' (불일치! 일부 저장 안 됨)'} · 현재 DB 전체 프로젝트 {result.totalInDb}건
+          </p>
+          {result.imported.length > 0 && (
+            <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 bg-white">
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-slate-100 text-slate-500">
+                  <tr>
+                    <th className="px-2 py-1.5">#</th>
+                    <th className="px-2 py-1.5">프로젝트명</th>
+                    <th className="px-2 py-1.5">기간</th>
+                    <th className="px-2 py-1.5">역할</th>
+                    <th className="px-2 py-1.5">기술 스택</th>
+                    <th className="px-2 py-1.5">성과</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.imported.map((p, i) => (
+                    <tr key={p.id} className="border-t border-slate-100 align-top">
+                      <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
+                      <td className="px-2 py-1.5 font-medium text-slate-800">{p.title}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{periodText(p.period)}</td>
+                      <td className="px-2 py-1.5">{p.role || '-'}</td>
+                      <td className="px-2 py-1.5">{p.techStack.join(', ') || '-'}</td>
+                      <td className="px-2 py-1.5">{p.outcomes.length}개</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {result.skipped.length > 0 && (
+            <details className="rounded-xl border border-slate-200 bg-white p-2">
+              <summary className="cursor-pointer text-slate-600">건너뛴 {result.skipped.length}건 보기</summary>
+              <ul className="mt-1 space-y-0.5 text-slate-500">
+                {result.skipped.map((s) => (
+                  <li key={s.row}>
+                    • {s.row}행 {s.title && `「${s.title}」`} — {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
     </div>
   );

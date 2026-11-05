@@ -5,7 +5,8 @@ import type { JobDescription } from '../../types';
 import {
   ApiError,
   buildMatchInsightPayload,
-  callLlm,
+  callLlmDetailed,
+  type LlmOutcome,
   type MatchInsightResult,
   type ParsedJdResult,
   type PolishResult,
@@ -15,14 +16,16 @@ function useAiCall<T>() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState<T | null>(null);
+  const [meta, setMeta] = useState<{ model: string; attempts: string[] } | null>(null);
 
-  const run = async (fn: () => Promise<T>): Promise<T | null> => {
+  const run = async (fn: () => Promise<LlmOutcome<T>>): Promise<T | null> => {
     setLoading(true);
     setError('');
     try {
       const out = await fn();
-      setData(out);
-      return out;
+      setData(out.result);
+      setMeta({ model: out.model, attempts: out.attempts });
+      return out.result;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'AI 호출 중 알 수 없는 오류가 발생했습니다.');
       return null;
@@ -30,7 +33,18 @@ function useAiCall<T>() {
       setLoading(false);
     }
   };
-  return { loading, error, data, run, reset: () => setData(null) };
+  return { loading, error, data, meta, run, reset: () => setData(null) };
+}
+
+/** 사용된 모델과(있다면) 먼저 실패해 건너뛴 모델을 작게 보여 준다 */
+function ModelNote({ meta }: { meta: { model: string; attempts: string[] } | null }) {
+  if (!meta || !meta.model) return null;
+  return (
+    <p className="text-[10px] text-slate-400">
+      사용 모델: {meta.model}
+      {meta.attempts.length > 0 && ` · 건너뛴 모델: ${meta.attempts.join(', ')}`}
+    </p>
+  );
 }
 
 const btn =
@@ -41,14 +55,14 @@ const btn =
 // ---------------------------------------------------------------
 
 export function AiJdParseButton({ rawText, onResult }: { rawText: string; onResult: (r: ParsedJdResult) => void }) {
-  const { loading, error, run } = useAiCall<ParsedJdResult>();
+  const { loading, error, meta, run } = useAiCall<ParsedJdResult>();
   return (
     <div className="space-y-1">
       <button
         type="button"
         disabled={loading || rawText.trim().length < 30}
         onClick={async () => {
-          const r = await run(() => callLlm<ParsedJdResult>('parse-jd', { rawText }));
+          const r = await run(() => callLlmDetailed<ParsedJdResult>('parse-jd', { rawText }));
           if (r) onResult(r);
         }}
         className={`${btn} bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100`}
@@ -58,6 +72,7 @@ export function AiJdParseButton({ rawText, onResult }: { rawText: string; onResu
         AI로 구조화 보강
       </button>
       {error && <p className="text-[11px] text-rose-600">{error}</p>}
+      <ModelNote meta={meta} />
     </div>
   );
 }
@@ -74,7 +89,7 @@ const ASSESS_STYLE = {
 const ASSESS_LABEL = { strong: '충분', partial: '부분', weak: '부족' } as const;
 
 export function AiMatchInsight({ jd }: { jd: JobDescription }) {
-  const { loading, error, data, run } = useAiCall<MatchInsightResult>();
+  const { loading, error, data, meta, run } = useAiCall<MatchInsightResult>();
 
   return (
     <div className="bg-violet-50/50 rounded-2xl p-5 border border-violet-200 space-y-3">
@@ -88,7 +103,7 @@ export function AiMatchInsight({ jd }: { jd: JobDescription }) {
           onClick={() =>
             run(async () => {
               const [projects, profile] = await Promise.all([db.projects.toArray(), db.profiles.get('current-user')]);
-              return callLlm<MatchInsightResult>('match-insight', buildMatchInsightPayload(jd, projects, profile ?? null));
+              return callLlmDetailed<MatchInsightResult>('match-insight', buildMatchInsightPayload(jd, projects, profile ?? null));
             })
           }
           className={`${btn} bg-white text-violet-700 border-violet-200 hover:bg-violet-100`}
@@ -101,6 +116,7 @@ export function AiMatchInsight({ jd }: { jd: JobDescription }) {
         키워드 매칭에 더해 의미 기반으로 요구사항별 근거 충족도를 평가합니다. 합격 가능성을 예측하지 않으며, 위의 객관적 충족도 점수는 바뀌지 않습니다.
       </p>
       {error && <p className="text-xs text-rose-600">{error}</p>}
+      {data && <ModelNote meta={meta} />}
       {data && (
         <div className="space-y-2">
           {data.summary && <p className="text-xs text-slate-700 leading-relaxed">{data.summary}</p>}
@@ -127,13 +143,13 @@ export function AiMatchInsight({ jd }: { jd: JobDescription }) {
 // ---------------------------------------------------------------
 
 export function AiPolishButton({ text, onPick }: { text: string; onPick: (t: string) => void }) {
-  const { loading, error, data, run, reset } = useAiCall<PolishResult>();
+  const { loading, error, data, meta, run, reset } = useAiCall<PolishResult>();
   return (
     <div className="relative">
       <button
         type="button"
         disabled={loading || text.trim().length < 5}
-        onClick={() => run(() => callLlm<PolishResult>('polish', { text }))}
+        onClick={() => run(() => callLlmDetailed<PolishResult>('polish', { text }))}
         className="p-2 text-violet-500 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors shrink-0 disabled:opacity-40"
         title="AI로 문장 다듬기 (원문에 없는 수치는 추가되지 않습니다)"
       >
@@ -156,6 +172,7 @@ export function AiPolishButton({ text, onPick }: { text: string; onPick: (t: str
               {s.note && <span className="block text-[10px] text-slate-400 mt-0.5">{s.note}</span>}
             </button>
           ))}
+          <ModelNote meta={meta} />
           <button type="button" onClick={reset} className="w-full text-center text-[11px] text-slate-400 hover:text-slate-600">
             닫기
           </button>
