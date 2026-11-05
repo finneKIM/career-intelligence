@@ -22,6 +22,18 @@ secrets/
 .env.test.local
 .env.production.local
 
+# 개인 데이터 보호: 앱이 내려받는 백업(career-intel-backup-날짜.json), 노션 내보내기(CSV/JSON) 등
+# 프로젝트 폴더에 실수로 저장해도 git 에 올라가지 않도록 막는다. (코드 파일 이름과 겹치지 않는 범위로 한정)
+career-intel-backup-*.json
+*backup*.json
+*.csv
+*notion*export*
+notion-*.json
+export*.json
+private/
+my-data/
+data/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
