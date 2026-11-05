@@ -63,7 +63,7 @@ export default function App() {
     }
   };
 
-  // temp.md 기준 네비게이션 탭 5종
+  // 네비게이션 탭 5종 (docs/UI_UX.md 기준)
   const mainNavTabs = [
     { id: 'dashboard' as const, label: '대시보드', icon: LayoutDashboard },
     { id: 'profile' as const, label: '커리어 프로필 & 프로젝트', icon: UserCircle2 },
@@ -75,7 +75,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
       {/* =========================================================
-          1. 상단 글로벌 헤더 & 네비게이션 바 (temp.md 사양 완벽 반영)
+          1. 상단 글로벌 헤더 & 네비게이션 바 (docs/UI_UX.md 사양 반영)
          ========================================================= */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

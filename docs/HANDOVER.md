@@ -25,8 +25,8 @@
 - **커밋 상태**
   - **2026-11-05 전체 커밋 완료, 로컬 `main` 8개 커밋** (마지막은 이 문서 갱신 커밋, 미커밋 파일 없음). 이력 재작성 후 해시: `462f339`(초기) → `e877123`(3-4/3-5) → `59c25dc`(3-6/3-7) → `810f497`(3-8 초기) → `7e6099d`(문서·보안 설정) → `d3dc3bb`(잔여 파일 정리) → 최신 `main`(BYOK·모델 자동 선택·노션 결과 표·보안 헤더·문서)
   - **이력 재작성**: 커밋 작성자·커밋자 이메일을 GitHub noreply 주소로 교체하고, 첫 커밋 문서 속 로컬 경로 문구(`C:/Users/<사용자>`로 치환)를 제거함. 재작성 전후 최종 파일 내용은 동일함을 `git diff`로 확인. 이 저장소의 `git config user.email`도 noreply로 설정함
-  - **백업**: 재작성 전 상태가 로컬 브랜치 `backup/pre-rewrite-20261105`와 `refs/original/`에 남아 있음 — 여기에는 **옛 이메일이 들어 있으므로 푸시하지 말 것**(푸시는 `main`만). 푸시 후 업로드 확인이 끝나면 삭제 가능
-  - 잔여 Next.js 파일(`app/`, `components/`, `lib/`, `next.config.mjs`, `pnpm-lock.yaml`)과 `temp.md` 삭제. `src/App.tsx` 주석에 `temp.md` 언급이 남아 있음(동작 무관). `components.json`(shadcn 설정)은 남겨 둠
+  - **백업 삭제(사용자 승인)**: 재작성 전 상태를 담았던 `backup/pre-rewrite-20261105` 브랜치, `refs/original/`, reflog를 삭제하고 `git gc --prune=now`로 옛 객체를 제거함. 되돌릴 수 없음
+  - 잔여 Next.js 파일(`app/`, `components/`, `lib/`, `next.config.mjs`, `pnpm-lock.yaml`, `components.json`)과 `temp.md` 삭제. `src/App.tsx`의 `temp.md` 언급 주석은 `docs/UI_UX.md` 기준으로 고침
   - **원격 푸시 안 함** (`origin` 등록만 됨, 사용자 지시 대기)
 
 ### 3. 실제 호출로 확인한 것 (개발 서버, 2026-11-04 ~ 11-05)
