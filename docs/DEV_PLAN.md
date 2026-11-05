@@ -148,7 +148,9 @@ analysisResults 테이블
 - [x] 문서 및 코드 내 로컬 절대 경로(`C:/Users/...`) 상대 경로로 전수 정제
 - [x] 개인 식별 정보 전수 검사 및 1차 안전 커밋(`dec7a37`) 생성
 - [x] GitHub 원격 저장소(`origin`: `https://github.com/finneKIM/career-intelligence.git`) 연결 완료
-- [ ] 사용자 명시적 요청 시 원격 푸시 (`git push -u origin main`) 대기 중
+- [x] 푸시 전 개인정보·비밀 값 검사 (2026-11-05): 키·토큰·전화번호 패턴 없음, `.env.local`은 추적 제외. 커밋 이메일을 GitHub noreply로 교체하고 이력 속 로컬 경로 문구 제거(`git filter-branch`, 백업 브랜치 `backup/pre-rewrite-20261105` 보관)
+- [x] 잔여 Next.js 파일·`temp.md` 정리 후 전체 커밋 (로컬 `main` 8개 커밋, 마지막은 문서 갱신)
+- [ ] 사용자 명시적 요청 시 원격 푸시 (`git push -u origin main`) 대기 중 — 푸시는 `main`만, 백업 브랜치는 제외
 
 ---
 
