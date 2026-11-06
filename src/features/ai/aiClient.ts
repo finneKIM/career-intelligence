@@ -1,4 +1,6 @@
 import type { JobDescription, Profile, Project } from '../../types';
+import { PiiLeakError, redactDeep, restoreDeep } from '../../utils/piiRedaction';
+import { hasUserRules, loadRedactionRules } from './piiGuard';
 
 /**
  * 서버리스(/api/*) 호출 클라이언트.
@@ -135,6 +137,10 @@ export interface LlmOutcome<T> {
   model: string;
   /** 이번 요청에서 먼저 실패해 건너뛴 모델 내역 (예: 'gemini-3.8-flash(503)') */
   attempts: string[];
+  /** 전송 전에 가린 개인정보 개수 */
+  redactedCount: number;
+  /** 이름·연락처·가림 단어가 하나라도 등록되어 있었는지 (false면 이름은 보호되지 않음) */
+  hadUserRules: boolean;
 }
 
 export async function callLlmDetailed<T>(task: LlmTask, payload: unknown): Promise<LlmOutcome<T>> {
@@ -144,8 +150,37 @@ export async function callLlmDetailed<T>(task: LlmTask, payload: unknown): Promi
   const headers = geminiAuthHeaders();
   const model = getGeminiModel();
   if (model) headers['x-gemini-model'] = model;
-  const out = await post<{ result: T; model?: string; attempts?: string[] }>('/api/llm', { task, payload }, headers);
-  return { result: out.result, model: out.model ?? '', attempts: out.attempts ?? [] };
+  // 관문: 모든 AI 호출은 여기서 개인정보를 가린 뒤에만 나간다. 가려지지 않은 값이 남으면 전송하지 않는다.
+  const rules = await loadRedactionRules();
+  let red;
+  try {
+    red = redactDeep(payload, rules);
+  } catch (e) {
+    if (e instanceof PiiLeakError) throw new ApiError(e.message, 0);
+    throw e;
+  }
+  const out = await post<{ result: T; model?: string; attempts?: string[] }>(
+    '/api/llm',
+    { task, payload: red.value },
+    headers,
+  );
+  const restored = restoreDeep(out.result, red.mapping);
+  let result = restored.value;
+  if (task === 'polish' && restored.unknown > 0) {
+    // 다듬기 제안은 저장될 수 있으므로, 해석할 수 없는 가림 표시가 든 제안은 버린다
+    const sug = (result as unknown as PolishResult).suggestions.filter(
+      (s) => restoreDeep(s.text, red.mapping).unknown === 0 && restoreDeep(s.note, red.mapping).unknown === 0,
+    );
+    if (sug.length === 0) throw new ApiError('AI 응답에 해석할 수 없는 가림 표시가 있어 제안을 폐기했습니다. 다시 시도해 주세요.', 0);
+    result = { ...(result as object), suggestions: sug } as T;
+  }
+  return {
+    result,
+    model: out.model ?? '',
+    attempts: out.attempts ?? [],
+    redactedCount: red.count,
+    hadUserRules: hasUserRules(rules),
+  };
 }
 
 export async function callLlm<T>(task: LlmTask, payload: unknown): Promise<T> {
@@ -165,7 +200,7 @@ export const fetchModels = () => post<ModelList>('/api/models', {}, geminiAuthHe
 export const fetchNotionDatabase = (creds: NotionCredentials) => post<unknown>('/api/notion', creds);
 
 // ---------------------------------------------------------------
-// 결과 타입 + 전송 페이로드 (개인 식별 정보는 보내지 않는다: 이름·연락처 제외)
+// 결과 타입 + 전송 페이로드 (프로필 이름은 담지 않으며, 전송 직전 callLlmDetailed가 연락처·가림 단어를 다시 가린다)
 // ---------------------------------------------------------------
 
 export interface ParsedJdResult {

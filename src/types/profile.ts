@@ -5,6 +5,11 @@ export interface Profile {
   targetRole: string; // 희망 직무 (예: AI Applied Engineer)
   targetDomains: string[]; // 관심 도메인 (예: ['소리 & 오디오', '미디어 & 생성형 AI'])
   skills: string[]; // 보유 기술 스택 태그 (예: ['PyTorch', 'FastAPI', 'Docker'])
+  // 연락처·가림 규칙: AI에 보내기 전에 가리는 용도(AI에는 보내지 않음). 백업 파일에는 포함됨
+  email?: string;
+  phone?: string;
+  address?: string;
+  redactTerms?: string[]; // 사용자 지정 가림 단어 (학교·이전 회사·영문 이름 표기 등)
   updatedAt: string; // 최근 수정 일시 (ISO 8601 String)
 }
 

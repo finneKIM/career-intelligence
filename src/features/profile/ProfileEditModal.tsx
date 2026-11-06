@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Plus, Sparkles } from 'lucide-react';
 import type { Profile } from '../../types';
+import { redactDeep, rulesFromProfile } from '../../utils/piiRedaction';
 
 interface ProfileEditModalProps {
   isOpen: boolean;
@@ -17,9 +18,27 @@ export function ProfileEditModal({ isOpen, profile, onClose, onSave }: ProfileEd
   const [domainInput, setDomainInput] = useState('');
   const [skills, setSkills] = useState<string[]>(profile.skills || []);
   const [skillInput, setSkillInput] = useState('');
+  const [email, setEmail] = useState(profile.email ?? '');
+  const [phone, setPhone] = useState(profile.phone ?? '');
+  const [address, setAddress] = useState(profile.address ?? '');
+  const [termsText, setTermsText] = useState((profile.redactTerms ?? []).join(', '));
+  const [sample, setSample] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
+
+  const parseTerms = () => termsText.split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+  // 가림 시험(미리보기): AI 호출 없이 브라우저 안에서만 계산한다
+  const preview = (() => {
+    if (!sample.trim()) return null;
+    try {
+      const rules = rulesFromProfile({ name, email, phone, address, redactTerms: parseTerms() });
+      const r = redactDeep(sample, rules);
+      return { text: r.value, count: r.count };
+    } catch {
+      return { text: '가림 검사를 통과하지 못했습니다. 입력을 확인해 주세요.', count: 0 };
+    }
+  })();
 
   // 관심 도메인 태그 추가
   const handleAddDomain = () => {
@@ -60,6 +79,10 @@ export function ProfileEditModal({ isOpen, profile, onClose, onSave }: ProfileEd
         targetRole: targetRole.trim(),
         targetDomains,
         skills,
+        email: email.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        redactTerms: parseTerms(),
         updatedAt: new Date().toISOString(),
       };
       await onSave(updated);
@@ -225,6 +248,47 @@ export function ProfileEditModal({ isOpen, profile, onClose, onSave }: ProfileEd
                   </button>
                 </span>
               ))}
+            </div>
+          </div>
+
+
+          {/* 연락처·가림 규칙: AI 전송 전 가리는 용도 */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-3">
+            <div>
+              <p className="text-xs font-bold text-amber-900">AI 전송 시 가릴 개인정보</p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                여기 적은 값은 AI에 보내지 않고, 보낼 문장에 들어 있으면 {'{이름A}'} 같은 표시로 바꿔 보냅니다. 백업 파일에는 포함됩니다.
+                이메일·전화번호·주민등록번호 형태는 등록하지 않아도 항상 가립니다.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">이메일</label>
+                <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="예: me@example.com" className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">전화번호</label>
+                <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="예: 010-0000-0000" className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">주소</label>
+              <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="예: 서울시 OO구 OO로 1" className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">추가로 가릴 단어 (쉼표로 구분)</label>
+              <input type="text" value={termsText} onChange={(e) => setTermsText(e.target.value)} placeholder="예: OO대학교, 이전 회사명, 영문 이름 표기" className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600" />
+              <p className="text-[10px] text-slate-500 mt-1">학교·회사명 같은 간접 정보는 자동으로 못 가리므로 여기에 적어 주세요. 너무 흔한 단어는 문장 속 일반 단어까지 가려질 수 있습니다.</p>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">가림 시험 (AI 호출 없음)</label>
+              <textarea value={sample} onChange={(e) => setSample(e.target.value)} rows={2} placeholder="샘플 문장을 넣어 어떻게 가려지는지 확인하세요" className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 text-xs" />
+              {preview && (
+                <p className="mt-1 text-[11px] text-slate-700 bg-white border border-slate-200 rounded-lg p-2 break-words">
+                  <span className="font-semibold">{preview.count}건 가림 → </span>
+                  {preview.text}
+                </p>
+              )}
             </div>
           </div>
 

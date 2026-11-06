@@ -8,6 +8,7 @@ import {
   resolveGeminiKey,
   upstreamReason,
 } from './gemini.js';
+import { countPiiLeaks } from './piiGuard.js';
 import { buildPrompt, validateMatchInsight, validateParseJd, validatePolish, type LlmTask } from './prompts.js';
 
 const TASKS: LlmTask[] = ['parse-jd', 'match-insight', 'polish'];
@@ -50,6 +51,13 @@ export async function handleLlm(req: ApiRequest, deps: HandlerDeps): Promise<Api
   const body = req.body as { task?: string; payload?: unknown } | undefined;
   if (!body || !TASKS.includes(body.task as LlmTask)) return json(400, { error: '지원하지 않는 task입니다.' });
   const task = body.task as LlmTask;
+
+  // 안전망: 브라우저가 가리지 못한 개인정보 형태가 있으면 외부(Gemini)로 보내지 않는다. 응답·로그에 원문을 싣지 않는다.
+  if (countPiiLeaks(body.payload) > 0) {
+    return json(400, {
+      error: '이메일·전화번호·주민등록번호 형태의 개인정보가 남아 있어 전송을 거부했습니다. 앱을 새로고침한 뒤 다시 시도하거나, 입력에서 해당 부분을 지워 주세요.',
+    });
+  }
 
   const prompt = buildPrompt(task, body.payload);
   if ('error' in prompt) return json(400, { error: prompt.error });

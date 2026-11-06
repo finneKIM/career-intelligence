@@ -12,11 +12,18 @@ import {
   type PolishResult,
 } from './aiClient';
 
+interface Meta {
+  model: string;
+  attempts: string[];
+  redactedCount: number;
+  hadUserRules: boolean;
+}
+
 function useAiCall<T>() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState<T | null>(null);
-  const [meta, setMeta] = useState<{ model: string; attempts: string[] } | null>(null);
+  const [meta, setMeta] = useState<Meta | null>(null);
 
   const run = async (fn: () => Promise<LlmOutcome<T>>): Promise<T | null> => {
     setLoading(true);
@@ -24,7 +31,7 @@ function useAiCall<T>() {
     try {
       const out = await fn();
       setData(out.result);
-      setMeta({ model: out.model, attempts: out.attempts });
+      setMeta({ model: out.model, attempts: out.attempts, redactedCount: out.redactedCount, hadUserRules: out.hadUserRules });
       return out.result;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'AI 호출 중 알 수 없는 오류가 발생했습니다.');
@@ -37,13 +44,23 @@ function useAiCall<T>() {
 }
 
 /** 사용된 모델과(있다면) 먼저 실패해 건너뛴 모델을 작게 보여 준다 */
-function ModelNote({ meta }: { meta: { model: string; attempts: string[] } | null }) {
-  if (!meta || !meta.model) return null;
+function ModelNote({ meta }: { meta: Meta | null }) {
+  if (!meta) return null;
   return (
-    <p className="text-[10px] text-slate-400">
-      사용 모델: {meta.model}
-      {meta.attempts.length > 0 && ` · 건너뛴 모델: ${meta.attempts.join(', ')}`}
-    </p>
+    <div className="space-y-0.5">
+      {meta.model && (
+        <p className="text-[10px] text-slate-400">
+          사용 모델: {meta.model}
+          {meta.attempts.length > 0 && ` · 건너뛴 모델: ${meta.attempts.join(', ')}`}
+        </p>
+      )}
+      <p className="text-[10px] text-slate-400">개인정보 {meta.redactedCount}건 가림 후 전송</p>
+      {!meta.hadUserRules && (
+        <p className="text-[10px] text-amber-600">
+          프로필에 연락처·가림 단어를 등록하면 이름도 가려서 보낼 수 있습니다 (프로필 기본정보 수정).
+        </p>
+      )}
+    </div>
   );
 }
 
