@@ -10,6 +10,7 @@ import {
   ClipboardCheck
 } from 'lucide-react';
 import { parseJobDescription } from './jdParserService';
+import { readUrlViaServer } from '../ai/aiClient';
 import { AiJdParseButton, type ParsedJdResult } from '../ai';
 import { db } from '../../db';
 import type { JobDescription } from '../../types';
@@ -61,17 +62,31 @@ export function JdInputModal({ isOpen, onClose, onSuccess }: JdInputModalProps) 
     setUrlFetchWarning(null);
   };
 
-  // URL 공고 가져오기 시뮬레이션 및 Fail-Safe 안내
-  const handleFetchFromUrl = () => {
+  // URL 공고 읽기(6-B): 서버가 robots.txt 확인·내부망 차단 후 본문 글자만 읽어 온다. 실패하면 사유와 함께 붙여넣기를 안내한다(Fail-Safe).
+  const [fetching, setFetching] = useState(false);
+  const handleFetchFromUrl = async () => {
     if (!sourceUrl.trim()) {
       alert('가져올 공고 링크(URL)를 입력해주세요.');
       return;
     }
-
-    setUrlFetchWarning(
-      '외부 채용 사이트의 보안 정책(CORS 및 봇 차단)으로 인해 브라우저 직접 스크래핑이 제한될 수 있습니다. 안전한 분석을 위해 공고 텍스트를 복사하여 아래 텍스트창에 직접 붙여넣는 방식을 권장합니다.'
-    );
-    setShowRawTextarea(true);
+    setFetching(true);
+    setUrlFetchWarning(null);
+    try {
+      const r = await readUrlViaServer(sourceUrl.trim());
+      if (r.ok) {
+        setRawText(r.text);
+        setShowRawTextarea(true);
+        setUrlFetchWarning(`페이지에서 ${r.text.length.toLocaleString()}자를 읽어 왔습니다${r.truncated ? ' (앞부분만)' : ''}. 광고·메뉴 글자가 섞여 있을 수 있으니 확인한 뒤 분석하세요.`);
+      } else {
+        setUrlFetchWarning(r.reason);
+        setShowRawTextarea(true);
+      }
+    } catch {
+      setUrlFetchWarning('서버에 연결하지 못해 읽어 오지 못했습니다. 공고 텍스트를 복사하여 아래 텍스트창에 붙여넣어 주세요.');
+      setShowRawTextarea(true);
+    } finally {
+      setFetching(false);
+    }
   };
 
   // 폼 제출 및 파싱 저장
@@ -180,9 +195,11 @@ export function JdInputModal({ isOpen, onClose, onSuccess }: JdInputModalProps) 
               <button
                 type="button"
                 onClick={handleFetchFromUrl}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors shrink-0 cursor-pointer"
+                disabled={fetching}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                title="사이트의 자동 수집 허용(robots.txt)을 확인한 뒤 페이지 글자를 읽어 옵니다"
               >
-                가져오기
+                {fetching ? '읽는 중…' : '가져오기'}
               </button>
             </div>
             {urlFetchWarning && (

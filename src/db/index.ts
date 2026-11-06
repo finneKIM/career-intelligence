@@ -5,7 +5,13 @@ import type {
   JobDescription, 
   Application, 
   AnalysisResult,
-  NotionMappingConfig 
+  NotionMappingConfig,
+  SourceDocument,
+  CompanyMaterial,
+  GeneratedDocument,
+  SyncRecord,
+  SyncStateItem,
+  SyncConflict,
 } from '../types';
 
 /**
@@ -19,9 +25,17 @@ export class CareerIntelDB extends Dexie {
   applications!: Table<Application, string>;
   analysisResults!: Table<AnalysisResult, string>;
   notionConfigs!: Table<NotionMappingConfig, string>;
+  // version(2): 동기화 보조 기록(로컬 전용, 서버로 보내지 않음)
+  syncRecords!: Table<SyncRecord, string>;
+  syncState!: Table<SyncStateItem, string>;
+  syncConflicts!: Table<SyncConflict, string>;
+  // version(3): Phase 5 문서 테이블 (동기화 대상)
+  sourceDocuments!: Table<SourceDocument, string>;
+  companyMaterials!: Table<CompanyMaterial, string>;
+  generatedDocuments!: Table<GeneratedDocument, string>;
 
-  constructor() {
-    super('CareerIntelligenceDB');
+  constructor(name = 'CareerIntelligenceDB') {
+    super(name);
 
     // 스키마 버전 1 정의 (인덱싱할 주요 검색/정렬 필드 지정)
     this.version(1).stores({
@@ -31,6 +45,20 @@ export class CareerIntelDB extends Dexie {
       applications: 'id, company, role, status, appliedDate, createdAt, updatedAt',
       analysisResults: 'id, jdId, analyzedAt, summaryScore',
       notionConfigs: 'id, lastSyncedAt',
+    });
+
+    // 버전 2: 동기화 보조 테이블만 추가한다(기존 테이블·데이터는 그대로). 기존 테이블 정의는 변경하지 않음.
+    this.version(2).stores({
+      syncRecords: 'key, table',
+      syncState: 'key',
+      syncConflicts: 'id, table, createdAt',
+    });
+
+    // 버전 3: Phase 5 문서 테이블 추가
+    this.version(3).stores({
+      sourceDocuments: 'id, kind, updatedAt',
+      companyMaterials: 'id, jdId, collectedAt',
+      generatedDocuments: 'id, jdId, kind, generatedAt',
     });
   }
 }

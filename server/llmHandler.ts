@@ -9,9 +9,20 @@ import {
   upstreamReason,
 } from './gemini.js';
 import { countPiiLeaks } from './piiGuard.js';
-import { buildPrompt, validateMatchInsight, validateParseJd, validatePolish, type LlmTask } from './prompts.js';
+import {
+  GENERATE_TASKS,
+  buildPrompt,
+  validateCompanySummary,
+  validateKeywords,
+  validateSearch,
+  validateGenerated,
+  validateMatchInsight,
+  validateParseJd,
+  validatePolish,
+  type LlmTask,
+} from './prompts.js';
 
-const TASKS: LlmTask[] = ['parse-jd', 'match-insight', 'polish'];
+const TASKS: LlmTask[] = ['parse-jd', 'match-insight', 'polish', 'company-summary', 'generate-resume', 'generate-cover-letter', 'generate-portfolio', 'company-search', 'extract-keywords'];
 /** 자동 선택 시 한 요청에서 시도할 최대 후보 수. 503처럼 빨리 실패하는 경우가 많아 넉넉히 두고, 실제 상한은 아래 시간 예산이 정한다. */
 const MAX_AUTO_TRIES = 6;
 /** 자동 모드: 전체 시간 예산 / 시도당 제한 / 이어서 시도할 최소 남은 시간 (서버리스 실행 시간 상한 대비) */
@@ -59,6 +70,12 @@ export async function handleLlm(req: ApiRequest, deps: HandlerDeps): Promise<Api
     });
   }
 
+  const search = task === 'company-search';
+  // Google 검색 연동은 유료 키 사용자 한정(앱이 요금제를 자동 판별하지 못해 사용자 선언 헤더를 요구). 실제 가능 여부는 Google이 최종 판단한다.
+  if (search && (req.headers['x-gemini-tier'] ?? '').toUpperCase() !== 'PAID') {
+    return json(403, { error: 'Google 검색 연동은 유료(결제 연결) Gemini 키를 쓴다고 설정에서 선언한 경우에만 사용할 수 있습니다. 무료 키는 기업 자료를 붙여넣어 주세요.' });
+  }
+
   const prompt = buildPrompt(task, body.payload);
   if ('error' in prompt) return json(400, { error: prompt.error });
 
@@ -92,7 +109,9 @@ export async function handleLlm(req: ApiRequest, deps: HandlerDeps): Promise<Api
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: prompt.system }] },
           contents: [{ role: 'user', parts: [{ text: prompt.user }] }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 4096 },
+          // 검색 도구와 JSON 응답 형식은 함께 쓸 수 없어, 검색 작업은 일반 텍스트로 받는다
+          generationConfig: search ? { temperature: 0.2, maxOutputTokens: 4096 } : { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 4096 },
+          ...(search ? { tools: [{ google_search: {} }] } : {}),
         }),
         signal: controller.signal,
       });
@@ -147,7 +166,7 @@ export async function handleLlm(req: ApiRequest, deps: HandlerDeps): Promise<Api
   if (!upstream.ok) return json(502, { error: `LLM 호출 실패 (상태 ${upstream.status})` });
 
   const data = (await upstream.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    candidates?: { content?: { parts?: { text?: string }[] }; groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] } }[];
   };
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
   const parsed = extractJson(text);
@@ -156,7 +175,17 @@ export async function handleLlm(req: ApiRequest, deps: HandlerDeps): Promise<Api
   let result: unknown = null;
   if (task === 'parse-jd') result = validateParseJd(parsed);
   else if (task === 'match-insight') result = validateMatchInsight(parsed, (payload.requirements as string[]) ?? []);
-  else result = validatePolish(parsed, String(payload.text ?? ''));
+  else if (task === 'company-summary') result = validateCompanySummary(parsed);
+  else if (task === 'extract-keywords') result = validateKeywords(parsed, `${String(payload.jdText ?? '')}
+${String(payload.companyText ?? '')}`);
+  else if (search) result = validateSearch(text, data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []);
+  else if (GENERATE_TASKS.includes(task)) {
+    const ev = (Array.isArray(payload.evidence) ? payload.evidence : []) as { id?: unknown; text?: unknown; label?: unknown }[];
+    result = validateGenerated(
+      parsed,
+      ev.filter((e) => typeof e?.id === 'string').map((e) => ({ id: String(e.id), text: String(e.text ?? ''), label: String(e.label ?? '') })),
+    );
+  } else result = validatePolish(parsed, String(payload.text ?? ''));
 
   if (!result) return json(502, { error: 'LLM 응답을 해석하지 못했습니다. 다시 시도하거나 다른 모델을 선택해 보세요.' });
   // attempts: 이번 요청에서 먼저 실패해 건너뛴 모델 내역 (없으면 빈 배열)

@@ -210,3 +210,29 @@ export function restoreDeep<T>(value: T, mapping: Map<string, string>): { value:
   ) as T;
   return { value: out, unknown };
 }
+
+// ---------------------------------------------------------------
+// 저장용 자리표시자 (AI 전송용 토큰과 별개): 이력서·자소서 본문에는 이름·연락처를 원문으로 두지 않고
+// {{이름}} 같은 자리표시자로 저장하며, 내보낼 때만 브라우저에서 실제 값으로 합친다.
+// ---------------------------------------------------------------
+const STORE_KINDS = new Set(['이름', '이메일', '전화', '주소', '주민번호']);
+
+export function placeholderize(text: string, rules: RedactionRules): string {
+  const compiled = compile({ ...rules, terms: [] });
+  return normalize(text).replace(compiled.all, (m) => {
+    const kind = compiled.classifiers.find((c) => c.full.test(m))?.kind ?? '';
+    return STORE_KINDS.has(kind) ? `{{${kind}}}` : m;
+  });
+}
+
+export interface Contact {
+  name?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+}
+
+export function composePlaceholders(text: string, c: Contact): string {
+  const map: Record<string, string | undefined> = { 이름: c.name, 이메일: c.email, 전화: c.phone, 주소: c.address };
+  return text.replace(/\{\{(이름|이메일|전화|주소)\}\}/g, (all, k: string) => map[k] || all);
+}

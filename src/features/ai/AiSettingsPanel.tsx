@@ -7,18 +7,21 @@ import {
   getAccessCode,
   getGeminiKey,
   getGeminiModel,
+  getLlmTier,
   hasAiConsent,
   isPersisted,
   setAccessCode,
   setAiConsent,
   setGeminiKey,
   setGeminiModel,
+  setLlmTier,
   type Health,
 } from './aiClient';
 
 export function AiSettingsPanel() {
   const [health, setHealth] = useState<Health | null | undefined>(undefined);
   const [consent, setConsent] = useState(hasAiConsent());
+  const [paid, setPaid] = useState(getLlmTier() === 'PAID');
   const [code, setCode] = useState(getAccessCode());
   const [key, setKey] = useState(getGeminiKey());
   const [persistKey, setPersistKey] = useState(isPersisted('gemini'));
@@ -153,6 +156,22 @@ export function AiSettingsPanel() {
           <strong className="text-slate-800">데이터 전송에 동의합니다.</strong> AI 기능을 누를 때에만 해당 공고 본문과 프로젝트 제목·기술·성과 문장이 서버를
           거쳐 Google Gemini로 전송됩니다. 프로필에 등록한 이름·연락처·가림 단어와 이메일·전화번호·주민등록번호 형태는 가려서 보냅니다. 다른 표기나 학교·회사명 같은 간접 정보는 자동으로 가리지 못합니다. 무료 티어에서는 입력이 Google의 서비스 개선에 사용될 수 있으므로 민감한
           내용은 넣지 마세요. 저장은 계속 이 브라우저에만 됩니다.
+        </span>
+      </label>
+
+      <label className="flex items-start gap-2 text-xs text-slate-700">
+        <input
+          type="checkbox"
+          checked={paid}
+          onChange={(e) => {
+            setPaid(e.target.checked);
+            setLlmTier(e.target.checked ? 'PAID' : 'FREE');
+          }}
+          className="mt-0.5"
+        />
+        <span>
+          <strong className="text-slate-800">내 Gemini 키는 유료(결제 연결) 프로젝트입니다.</strong> 앱은 키의 요금제를 알 수 없어 직접 선언합니다. 선언하면 기업 정보를 Google 검색으로 찾는 기능을 쓸 수 있습니다
+          (유료 티어는 입력이 서비스 개선에 쓰이지 않는다고 안내되어 있으나, 실제 가능 여부는 Google이 판단합니다). 무료 키라면 선택하지 말고 기업 자료를 붙여넣어 주세요.
         </span>
       </label>
 

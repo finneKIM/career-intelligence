@@ -36,4 +36,16 @@ export interface AnalysisResult {
   evidenceGaps: EvidenceGap[]; // 🟠 증거 공백 (JD 요구 대비 부족한 부분)
   summaryScore: number; // 종합 역량 충족도 점수 (객관적 지표, 0~100)
   analyzedAt: string; // 분석 일시 (ISO String)
+  /** 분석 체계 버전. 없으면 v1(규칙 기반). 'v2-ai' = 기업 맥락을 반영한 AI 심층 분석 스냅샷 */
+  analysisVersion?: string;
+  aiInsight?: {
+    summary: string;
+    items: { requirement: string; assessment: 'strong' | 'partial' | 'weak'; reason: string; improvement: string }[];
+    model: string;
+    companyContextUsed: boolean;
+    /** 6-D: 키워드 대조 결과와 장점·보완점(합격 가능성 표현 없음) */
+    keywords?: { term: string; level: 'DIRECT' | 'INDIRECT' | 'UNCONFIRMED'; weight: number }[];
+    strengths?: string[];
+    improvements?: string[];
+  };
 }

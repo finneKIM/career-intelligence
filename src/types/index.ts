@@ -9,3 +9,6 @@ export * from './application';
 
 // 노션 동적 스키마 감지 및 매핑 설정 모델
 export * from './notion';
+
+// Phase 5: 과거 자료·기업 자료·생성 문서, 동기화 보조 기록
+export * from './documents';

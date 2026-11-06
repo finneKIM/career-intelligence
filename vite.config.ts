@@ -13,7 +13,9 @@ function localApi(mode: string): Plugin {
     name: 'local-api',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const route = (req.url ?? '').split('?')[0];
+        const path = (req.url ?? '').split('?')[0];
+        // /api/account/* 는 함수 1개(/api/account)가 하위 경로를 나눠 처리한다 (Vercel 무료 함수 12개 한도 대비)
+        const route = path.startsWith('/api/account/') ? '/api/account' : path;
         if (!(route in ROUTES)) return next();
         void handleNodeRequest(req, res, route, env);
       });

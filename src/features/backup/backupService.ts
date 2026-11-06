@@ -1,7 +1,7 @@
 import { db } from '../../db';
 
 export const BACKUP_FORMAT = 'career-intelligence-backup';
-export const BACKUP_VERSION = 2;
+export const BACKUP_VERSION = 3; // v3: 과거 자료·기업 자료·생성 문서 테이블 추가(v1·v2 파일도 그대로 복원 가능)
 
 /** 백업 대상 테이블 (notionConfigs의 API 토큰은 보안상 제외) */
 export const BACKUP_TABLES = [
@@ -11,6 +11,9 @@ export const BACKUP_TABLES = [
   'applications',
   'analysisResults',
   'notionConfigs',
+  'sourceDocuments',
+  'companyMaterials',
+  'generatedDocuments',
 ] as const;
 
 export type BackupTableName = (typeof BACKUP_TABLES)[number];
@@ -40,7 +43,7 @@ export function sanitizeRecord(table: BackupTableName, record: Record<string, un
 }
 
 export function buildBackup(
-  tables: Record<BackupTableName, Record<string, unknown>[]>,
+  tables: Partial<Record<BackupTableName, Record<string, unknown>[]>>,
   now: Date = new Date(),
 ): BackupFile {
   const sanitized = {} as BackupFile['tables'];
@@ -132,6 +135,9 @@ function emptyTables(): BackupFile['tables'] {
     applications: [],
     analysisResults: [],
     notionConfigs: [],
+    sourceDocuments: [],
+    companyMaterials: [],
+    generatedDocuments: [],
   };
 }
 

@@ -11,12 +11,16 @@ export interface ApiRequest {
   /** 원문 본문 길이(바이트 근사) — 크기 제한 검사용 */
   bodyBytes?: number;
   ip?: string;
+  /** 요청 경로(쿼리 제외). 하나의 함수가 여러 하위 경로를 처리할 때 사용 */
+  path?: string;
 }
 
 export interface ApiResponse {
   status: number;
   body: unknown;
   headers?: Record<string, string>;
+  /** 여러 개일 수 있는 Set-Cookie 값 */
+  setCookies?: string[];
 }
 
 export type Env = Record<string, string | undefined>;
@@ -44,6 +48,8 @@ export const json = (status: number, body: unknown, headers?: Record<string, str
 });
 
 export const MAX_BODY_BYTES = 60_000;
+/** 계정·동기화 API는 레코드 1건이 최대 512KB 암호문이라 별도 한도(Vercel 무료 플랜 본문 상한은 4.5MB) */
+export const ACCOUNT_BODY_LIMIT = 1_000_000;
 
 /** 길이가 같을 때 전 구간을 비교하는 문자열 비교 (접근 코드 검사용) */
 export function safeEqual(a: string, b: string): boolean {
@@ -57,10 +63,10 @@ export function safeEqual(a: string, b: string): boolean {
  * 공통 요청 가드: 메서드, 크기, 출처(Origin), 접근 코드.
  * 통과하면 null, 거부하면 응답을 반환.
  */
-export function guardRequest(req: ApiRequest, env: Env, opts: { requireAccessCode: boolean }): ApiResponse | null {
+export function guardRequest(req: ApiRequest, env: Env, opts: { requireAccessCode: boolean; maxBytes?: number }): ApiResponse | null {
   if (req.method !== 'POST') return json(405, { error: 'POST만 허용됩니다.' }, { Allow: 'POST' });
 
-  if ((req.bodyBytes ?? 0) > MAX_BODY_BYTES) return json(413, { error: '요청이 너무 큽니다.' });
+  if ((req.bodyBytes ?? 0) > (opts.maxBytes ?? MAX_BODY_BYTES)) return json(413, { error: '요청이 너무 큽니다.' });
 
   // 출처 검사: ALLOWED_ORIGINS(쉼표 구분)가 있으면 그 목록만, 없으면 Origin 호스트 == Host 인 동일 출처만 허용.
   const origin = req.headers['origin'];

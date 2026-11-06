@@ -19,6 +19,9 @@ const TABLE_LABELS: Record<(typeof BACKUP_TABLES)[number], string> = {
   applications: '지원 이력',
   analysisResults: '매칭 분석',
   notionConfigs: '노션 설정',
+  sourceDocuments: '과거 이력서·자소서',
+  companyMaterials: '기업 자료',
+  generatedDocuments: '생성 문서',
 };
 
 interface Props {

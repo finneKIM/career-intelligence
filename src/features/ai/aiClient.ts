@@ -33,6 +33,11 @@ export const getGeminiModel = (): string => localStorage.getItem(MODEL_KEY) ?? '
 export const setGeminiModel = (v: string): void =>
   v ? localStorage.setItem(MODEL_KEY, v) : localStorage.removeItem(MODEL_KEY);
 
+const TIER_KEY = 'ci.ai.tier';
+/** 사용자가 직접 선언한 Gemini 키 요금제(앱이 자동으로 알 수 없음). 유료 선언 시에만 Google 검색 연동을 쓸 수 있다 */
+export const getLlmTier = (): 'FREE' | 'PAID' => (localStorage.getItem(TIER_KEY) === 'PAID' ? 'PAID' : 'FREE');
+export const setLlmTier = (v: 'FREE' | 'PAID'): void => (v === 'PAID' ? localStorage.setItem(TIER_KEY, 'PAID') : localStorage.removeItem(TIER_KEY));
+
 export const getGeminiKey = (): string => readSecret(GEMINI_KEY) ?? '';
 export const setGeminiKey = (v: string, persist = false): void => writeSecret(GEMINI_KEY, v.trim() || null, persist);
 
@@ -106,6 +111,8 @@ export interface Health {
   accessCodeRequired: boolean;
   /** 방문자가 본인 Gemini 키를 입력해 쓰는 방식 지원 */
   byok?: boolean;
+  /** 계정·동기화 기능을 쓸 수 있는 서버 설정이 되어 있음(참/거짓만) */
+  accounts?: boolean;
 }
 
 export async function fetchHealth(): Promise<Health | null> {
@@ -119,7 +126,16 @@ export async function fetchHealth(): Promise<Health | null> {
   }
 }
 
-export type LlmTask = 'parse-jd' | 'match-insight' | 'polish';
+export type LlmTask =
+  | 'parse-jd'
+  | 'match-insight'
+  | 'polish'
+  | 'company-summary'
+  | 'generate-resume'
+  | 'generate-cover-letter'
+  | 'generate-portfolio'
+  | 'company-search'
+  | 'extract-keywords';
 
 /** Gemini 호출용 인증 헤더: 본인 키가 있으면 키, 없을 때만 운영자 키용 접근 코드 */
 function geminiAuthHeaders(): Record<string, string> {
@@ -150,6 +166,7 @@ export async function callLlmDetailed<T>(task: LlmTask, payload: unknown): Promi
   const headers = geminiAuthHeaders();
   const model = getGeminiModel();
   if (model) headers['x-gemini-model'] = model;
+  if (task === 'company-search') headers['x-gemini-tier'] = getLlmTier();
   // 관문: 모든 AI 호출은 여기서 개인정보를 가린 뒤에만 나간다. 가려지지 않은 값이 남으면 전송하지 않는다.
   const rules = await loadRedactionRules();
   let red;
@@ -197,6 +214,13 @@ export interface ModelList {
 /** 이 키로 쓸 수 있는 텍스트 모델 목록 (추천 순). 사용자 데이터는 전송하지 않는다. */
 export const fetchModels = () => post<ModelList>('/api/models', {}, geminiAuthHeaders());
 
+export type ReadUrlResult =
+  | { ok: true; text: string; title: string; finalUrl: string; truncated: boolean }
+  | { ok: false; code: string; reason: string };
+
+/** 공고·기업 페이지 읽기(서버가 robots.txt 확인·내부망 차단 후 본문 글자만 돌려줌). 실패해도 예외 대신 ok:false 로 사유를 돌려준다 */
+export const readUrlViaServer = (url: string) => post<ReadUrlResult>('/api/read-url', { url });
+
 export const fetchNotionDatabase = (creds: NotionCredentials) => post<unknown>('/api/notion', creds);
 
 // ---------------------------------------------------------------
@@ -217,12 +241,39 @@ export interface MatchInsightResult {
   items: { requirement: string; assessment: 'strong' | 'partial' | 'weak'; reason: string; improvement: string }[];
 }
 
+export interface CompanySummaryResult {
+  overview: string;
+  keyPoints: string[];
+  talentTraits: string[];
+}
+
+export interface CompanySearchResult {
+  summary: string;
+  sources: { url: string; title: string }[];
+}
+
+export interface KeywordsResult {
+  keywords: { term: string; reason: string }[];
+}
+
+export interface GeneratedResult {
+  sections: { heading: string; paragraphs: { text: string; evidenceIds: string[] }[] }[];
+  /** 서버 검증에서 버려진 문단 수(근거 없음·새 수치) */
+  dropped: number;
+}
+
 export interface PolishResult {
   suggestions: { text: string; note: string }[];
 }
 
-export function buildMatchInsightPayload(jd: JobDescription, projects: Project[], profile: Profile | null) {
+export interface CompanyContext {
+  overview: string;
+  keyPoints: string[];
+}
+
+export function buildMatchInsightPayload(jd: JobDescription, projects: Project[], profile: Profile | null, company?: CompanyContext | null) {
   return {
+    ...(company ? { company: { overview: company.overview, keyPoints: company.keyPoints } } : {}),
     requirements: [...jd.sections.qualifications, ...jd.sections.responsibilities, ...jd.sections.preferred].slice(0, 30),
     projects: projects.map((p) => ({ title: p.title, techStack: p.techStack, outcomes: p.outcomes })),
     skills: profile?.skills ?? [],

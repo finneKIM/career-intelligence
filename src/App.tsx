@@ -9,7 +9,8 @@ import {
   Settings as SettingsIcon,
   Database,
   RefreshCw,
-  ArrowRight
+  ArrowRight,
+  FilePenLine
 } from 'lucide-react';
 import { db, getOrCreateDefaultProfile, seedSampleProjectsIfEmpty } from './db';
 import type { Profile, Project } from './types';
@@ -20,10 +21,14 @@ import { CareerExplorerView } from './features/explorer';
 import { BackupPanel } from './features/backup';
 import { NotionAdapterPanel } from './features/notion';
 import { AiSettingsPanel } from './features/ai';
+import { DocumentsView } from './features/documents/DocumentsView';
+import { AccountPanel, UploadConfirm } from './features/account/AccountPanel';
+import { useAccount } from './features/account/AccountContext';
 
-export type TabType = 'dashboard' | 'profile' | 'jd' | 'tracker' | 'explorer' | 'settings';
+export type TabType = 'dashboard' | 'profile' | 'jd' | 'tracker' | 'explorer' | 'documents' | 'settings';
 
 export default function App() {
+  const account = useAccount();
   const [activeTab, setActiveTab] = useState<TabType>('profile');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -45,9 +50,10 @@ export default function App() {
     }
   };
 
+  // 처음 한 번, 그리고 동기화로 로컬 데이터가 바뀔 때마다 다시 읽는다
   useEffect(() => {
     loadData();
-  }, []);
+  }, [account.dataVersion]);
 
   // 샘플 데이터 시딩
   const handleSeedSamples = async () => {
@@ -70,6 +76,7 @@ export default function App() {
     { id: 'jd' as const, label: '채용공고 분석기', icon: FileSearch },
     { id: 'tracker' as const, label: '지원 트래커', icon: KanbanSquare },
     { id: 'explorer' as const, label: 'Career Explorer', icon: Compass },
+    { id: 'documents' as const, label: '맞춤 문서 생성', icon: FilePenLine },
   ];
 
   return (
@@ -110,6 +117,16 @@ export default function App() {
                 <span>🔒 Local-First (IndexedDB Ready)</span>
               </div>
 
+              {account.status === 'ready' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('settings')}
+                  className="hidden md:inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 cursor-pointer"
+                  title="계정에 로그인되어 암호화 동기화 중입니다"
+                >
+                  <span>☁ {account.sync.syncing ? '동기화 중…' : account.sync.error ? '동기화 오류' : '동기화됨'}</span>
+                </button>
+              )}
               {/* ⚙️ 설정 & 백업 버튼 */}
               <button
                 type="button"
@@ -230,6 +247,9 @@ export default function App() {
           <CareerExplorerView />
         )}
 
+        {/* 탭: 맞춤 문서 생성 (Phase 5) */}
+        {activeTab === 'documents' && <DocumentsView key={account.dataVersion} />}
+
         {/* 탭 6: 설정 & 노션 동적 연동 & 백업 (Phase 3-6 / 3-7 완성) */}
         {activeTab === 'settings' && (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm space-y-6">
@@ -239,6 +259,8 @@ export default function App() {
                 <p className="text-xs text-slate-500 mt-0.5">로컬 저장소의 데이터를 백업하거나 외부 노션 데이터와 동적 1:1 매핑을 설정합니다.</p>
               </div>
             </div>
+
+            <AccountPanel />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <BackupPanel onRestored={loadData} />
@@ -296,6 +318,7 @@ export default function App() {
       {/* =========================================================
           3. 푸터
          ========================================================= */}
+      <UploadConfirm />
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
         Career Intelligence MVP © 2026 • Local-First Architecture with Dexie.js
       </footer>

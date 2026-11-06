@@ -1,8 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ApiRequest, ApiResponse, FetchLike, HandlerDeps } from './http.js';
+import { ACCOUNT_BODY_LIMIT, type ApiRequest, type ApiResponse, type FetchLike, type HandlerDeps } from './http.js';
 import { handleLlm } from './llmHandler.js';
 import { handleNotion } from './notionHandler.js';
 import { handleModels } from './modelsHandler.js';
+import { handleAccount } from './account/handler.js';
+import { handleReadUrl } from './urlReadHandler.js';
 
 /** Node 내장 fetch를 FetchLike 형태로 사용 */
 export const nodeFetch: FetchLike = (url, init) => fetch(url, init) as ReturnType<FetchLike>;
@@ -27,8 +29,21 @@ function safeParse(text: string): unknown {
   }
 }
 
+/**
+ * 요청 경로. Vercel 의 rewrite(`/api/account/:path*` → `/api/account?p=:path*`)를 거치면 원래 경로가 쿼리의 p 로 전달되므로
+ * 그 값을 우선한다(rewrite 후 req.url 이 어떻게 보이는지에 의존하지 않기 위함).
+ */
+export function resolvePath(url: string): string {
+  const [path, query = ''] = url.split('?');
+  if (path === '/api/account') {
+    const p = new URLSearchParams(query).get('p');
+    if (p !== null) return '/api/account/' + p.replace(/^\/+/, '');
+  }
+  return path;
+}
+
 /** Node IncomingMessage → ApiRequest */
-export async function toApiRequest(req: IncomingMessage): Promise<ApiRequest> {
+export async function toApiRequest(req: IncomingMessage, bodyLimit?: number): Promise<ApiRequest> {
   const headers: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(req.headers)) headers[k.toLowerCase()] = Array.isArray(v) ? v[0] : v;
 
@@ -40,12 +55,12 @@ export async function toApiRequest(req: IncomingMessage): Promise<ApiRequest> {
     body = typeof pre === 'string' ? safeParse(pre) : pre;
     bytes = Buffer.byteLength(typeof pre === 'string' ? pre : JSON.stringify(pre));
   } else if (req.method === 'POST') {
-    const { text, bytes: b } = await readBody(req);
+    const { text, bytes: b } = await readBody(req, bodyLimit);
     bytes = b;
     if (text) body = safeParse(text);
   }
   const fwd = headers['x-forwarded-for']?.split(',')[0]?.trim();
-  return { method: req.method ?? 'GET', headers, body, bodyBytes: bytes, ip: fwd || req.socket.remoteAddress };
+  return { method: req.method ?? 'GET', headers, body, bodyBytes: bytes, ip: fwd || req.socket.remoteAddress, path: resolvePath(req.url ?? '') };
 }
 
 export function sendApiResponse(res: ServerResponse, out: ApiResponse): void {
@@ -53,6 +68,7 @@ export function sendApiResponse(res: ServerResponse, out: ApiResponse): void {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   for (const [k, v] of Object.entries(out.headers ?? {})) res.setHeader(k, v);
+  if (out.setCookies?.length) res.setHeader('Set-Cookie', out.setCookies);
   res.end(JSON.stringify(out.body));
 }
 
@@ -60,6 +76,8 @@ export const ROUTES: Record<string, (req: ApiRequest, deps: HandlerDeps) => Prom
   '/api/llm': handleLlm,
   '/api/notion': handleNotion,
   '/api/models': handleModels,
+  '/api/account': handleAccount,
+  '/api/read-url': handleReadUrl,
   '/api/health': async (_req, deps) => ({
     status: 200,
     body: {
@@ -68,6 +86,8 @@ export const ROUTES: Record<string, (req: ApiRequest, deps: HandlerDeps) => Prom
       accessCodeRequired: !!deps.env.APP_ACCESS_CODE,
       // 방문자가 자기 Gemini 키를 입력해 쓰는 방식은 항상 가능
       byok: true,
+      // 계정 기능 사용 가능 여부(참/거짓만 노출): DB 연결 문자열과 인증 비밀 값이 모두 있어야 켜진다
+      accounts: !!deps.env.DATABASE_URL && (deps.env.BETTER_AUTH_SECRET?.length ?? 0) >= 32,
     },
   }),
 };
@@ -80,7 +100,7 @@ export async function handleNodeRequest(req: IncomingMessage, res: ServerRespons
     return;
   }
   try {
-    const apiReq = await toApiRequest(req);
+    const apiReq = await toApiRequest(req, route === '/api/account' ? ACCOUNT_BODY_LIMIT : undefined);
     const out = await handler(apiReq, { env, fetch: nodeFetch });
     sendApiResponse(res, out);
   } catch {
