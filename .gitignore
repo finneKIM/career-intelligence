@@ -34,6 +34,10 @@ private/
 my-data/
 data/
 
+# 비공개 DB 계획서·SQL 초안 (로컬 전용, GitHub에 올리지 않음 — 사용자 결정 2026-11-06)
+docs/DB_IMPLEMENTATION_PLAN.md
+docs/drafts/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

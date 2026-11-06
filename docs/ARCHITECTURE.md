@@ -8,7 +8,7 @@
 
 - **아키텍처 패턴**: **Local-First 4-Layer Architecture (로컬 퍼스트 4계층 아키텍처)**
 - **핵심 설계 철학**:
-  - **프라이버시 중심 (Privacy-First)**: 구직자의 이력서, 자소서, 프로젝트 정보는 외부 중앙 서버에 **저장되지 않고** 사용자 브라우저(IndexedDB)에 격리 보관됩니다. AI 분석·노션 불러오기 실행 시에만 필요한 최소 내용이 **무상태(stateless) 서버리스 함수**를 거쳐 외부로 전달됩니다(저장·로그 없음, 사용자 동의 후).
+  - **프라이버시 중심 (Privacy-First)**: 구직자의 이력서, 자소서, 프로젝트 정보는 외부 중앙 서버에 **저장되지 않고** 사용자 브라우저(IndexedDB)에 격리 보관됩니다. AI 분석·노션 불러오기 실행 시에만 필요한 최소 내용이 **무상태(stateless) 서버리스 함수**를 거쳐 외부로 전달됩니다(저장·로그 없음, 사용자 동의 후). *(승인된 계획, 구현 전: 계정 기능이 구현되면 가입한 사용자의 데이터는 브라우저에서 암호화한 사본만 서버 DB(Neon)에 동기화되며 서버 운영자는 내용을 읽을 수 없습니다. 3-1 ⑥~⑦과 3-2 참고. 구현·배포 전까지는 위가 현재 동작입니다.)*
   - **비밀 값 분리 (Secret Isolation, 방문자별 BYOK)**: 방문자마다 노션 계정·DB·Gemini 키가 다르므로 서버에는 방문자의 비밀 값을 두지 않습니다. 방문자가 입력한 Gemini 키·노션 토큰은 방문자 브라우저에만 보관(기본 `sessionStorage`, 선택 시 `localStorage`)하고 호출 때만 서버를 통과합니다. 운영자 본인의 Gemini 키(서버 환경 변수)는 접근 코드가 맞을 때만 쓰이며 공개 배포에서는 등록하지 않는 것을 권장합니다.
   - **어댑터 기반 확장성 (Adapter-Driven Extensibility)**: 로컬 저장소와 외부 데이터(예: 노션, 추후 링크드인 등)의 형식을 추상화하여, 새로운 데이터 소스가 추가되어도 UI나 매칭 로직이 영향을 받지 않는 구조를 유지합니다.
   - **불변 스냅샷 보존 (Immutable Snapshot)**: 지원 시점의 공고 원문과 제출 서류, 분석 결과는 최신 프로필 변경과 독립적으로 영구 보존됩니다.
@@ -35,10 +35,11 @@ flowchart TD
         ExplorerEngine["Role(4종) × Domain(4종) 매트릭스 계산기"]
     end
 
-    subgraph Serverless ["2-1. 서버리스 중계 계층 (Vercel Functions, 무상태)"]
+    subgraph Serverless ["2-1. 서버리스 중계 계층 (Vercel Functions, 현재 무상태)"]
         ApiLlm["/api/llm : Gemini 호출 · 프롬프트 구성 · 응답 검증"]
         ApiNotion["/api/notion : 노션 API 프록시 (호스트 고정)"]
         Guard["공통 가드: 출처 검사 · 크기 제한 · 레이트 리밋 · 접근 코드"]
+        ApiSync["(계획·미구현) 로그인·암호문 동기화 API : 세션 확인 후 서버가 user_id 결정"]
     end
 
     subgraph Adapter ["3. 데이터 어댑터 계층 (Data Adapter / Repository Layer)"]
@@ -51,6 +52,7 @@ flowchart TD
     subgraph Storage ["4. 저장소 계층 (Storage & External Layer)"]
         LocalIDB[("브라우저 IndexedDB (CareerIntelDB)")]
         NotionFiles["노션 내보내기 파일 (CSV / JSON)"]
+        NeonDB[("서버 DB Neon Postgres (연결 완료·현재 비어 있음, 계획: 암호문만 저장)")]
     end
 
     UI --> Service
@@ -60,6 +62,8 @@ flowchart TD
     RepoManager --> BackupAdapter
     DexieAdapter --> LocalIDB
     NotionAdapter --> NotionFiles
+    DexieAdapter -.->|"(계획) 암호화 동기화"| ApiSync
+    ApiSync -.->|"(계획) 암호문 저장"| NeonDB
 ```
 
 ---
@@ -210,6 +214,160 @@ export interface NotionMappingConfig {
 
 ---
 
+## 3-1. 승인 확장: 기업 분석 & 맞춤 문서 생성 설계 초안 (2026-11-06 승인 · 구현 전)
+
+> 아래는 **구현 전 설계 초안**입니다. 코드에는 아직 없으며, 구현하면서 확인된 사실로 고칩니다. 상세 요구사항은 `PRD.md` 2-2 참고.
+
+### ① 새 데이터 모델 (초안)
+```typescript
+// ⑦ SourceDocument — 과거 이력서·자소서·포트폴리오 원문 (사용자가 붙여넣은 텍스트)
+export type DocumentKind = 'RESUME' | 'COVER_LETTER' | 'PORTFOLIO';
+export interface SourceDocument {
+  id: string;
+  kind: DocumentKind;
+  title: string; // 예: '2025 상반기 이력서 v2'
+  text: string; // 원문. 이름·연락처가 있을 수 있으므로 AI 전송 전 제거/치환
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ⑧ CompanyProfile — 공고별 기업 자료 (발췌·요약·링크만 저장, 원문 전체 저장 금지)
+export type CollectStatus = 'MANUAL' | 'FETCHED' | 'FAILED';
+export interface CompanySource {
+  url?: string;
+  title?: string;
+  excerpt: string; // 짧은 발췌
+  collectedAt: string;
+  status: CollectStatus;
+  failReason?: string; // AGENTS.md 9-5: 실패 원인 기록
+}
+export interface CompanyProfile {
+  id: string;
+  jdId: string;
+  company: string;
+  sources: CompanySource[];
+  summary?: { business: string[]; techStack: string[]; culture: string[]; recentNews: string[] }; // AI 요약(참고용)
+  summarizedAt?: string;
+  summaryModel?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ⑨ GeneratedDocument — 생성 문서 버전 (덮어쓰지 않음)
+export interface GeneratedClaim {
+  text: string; // 생성 문장
+  evidence: { projectId?: string; sourceDocumentId?: string; quote: string }[]; // 근거
+  level: 'DIRECT' | 'INDIRECT'; // 본문에는 DIRECT만 허용 (INDIRECT·미확인은 '보완 제안'으로 분리)
+}
+export interface GeneratedDocument {
+  id: string;
+  kind: DocumentKind;
+  jdId: string;
+  applicationId?: string;
+  version: number;
+  title: string;
+  body: string; // 사용자가 검수·확정한 본문 (이름·연락처 제외, 내보내기 때 브라우저에서 합성)
+  claims: GeneratedClaim[];
+  basis: { analysisResultId?: string; companyProfileId?: string; sourceDocumentIds: string[]; projectIds: string[] };
+  generatedAt: string;
+  model: string;
+  analysisVersion: string;
+  tier: 'FREE' | 'PAID'; // 사용자가 선언한 요금제 (앱이 자동 판별하지 못함)
+  status: 'DRAFT' | 'CONFIRMED';
+}
+```
+
+### ② DB 마이그레이션 계획 (Dexie)
+- 현재 `CareerIntelligenceDB`는 **버전 1, 테이블 6개**입니다 (`src/db/index.ts`).
+- `version(2)`에서 기존 6개 정의는 그대로 두고 아래 3개만 추가합니다 (기존 데이터 영향 없음):
+  - `sourceDocuments: 'id, kind, updatedAt'`
+  - `companyProfiles: 'id, jdId, company, updatedAt'`
+  - `generatedDocuments: 'id, kind, jdId, applicationId, version, generatedAt'`
+- 백업/복원: `BACKUP_TABLES`에 3개 추가, `BACKUP_VERSION` 2 → 3. **구버전(v1·v2) 백업 복원 호환 유지**, 새 테이블이 없는 백업은 빈 배열로 처리. 노션 토큰·Gemini 키는 계속 백업 제외.
+
+### ③ 서버 처리 (평문 비저장)
+- `LlmTask`에 단계별 작업 추가 (가칭): `company-summary` → `fit-analysis` → `generate-resume` / `generate-cover-letter` / `generate-portfolio`. 현재는 `parse-jd`·`match-insight`·`polish` 3개.
+- 서버 검증 확장: 응답 스키마, **입력에 없던 수치·고유명사 제거**, 근거 ID가 요청에 실제로 있던 것인지 확인, 근거 없는 문장은 폐기.
+- 한 요청에 모두 몰지 않고 **단계별 요청**으로 나눔 (요청당 40초 예산, 본문 60KB 제한). 관련 근거 선별은 브라우저에서 먼저 수행.
+- 서버 함수는 문서·기업 자료의 **평문을 저장하지 않음**(계정 동기화 구현 후에도 서버 DB에는 암호문만 저장). 기존 정책(AI 결과 미저장)도 유지하며 생성 문서는 **사용자가 저장을 눌렀을 때만** 브라우저 DB에 저장(계정 사용자는 이후 암호화 동기화).
+
+### ④ 내보내기 (브라우저에서 생성, 서버 불필요)
+- 이력서·자소서: PDF(브라우저 인쇄 기반 기본안), Word `.docx` — `docx` 라이브러리 후보(MIT, 브라우저 동작 확인)
+- 포트폴리오: PDF, `.pptx` — `PptxGenJS` 후보(MIT, 브라우저 다운로드 확인), **구형 `.ppt`는 구현 방법 미확인**
+- 두 라이브러리 모두 **아직 설치하지 않았고 확정 전**입니다. 한글 표시는 시험 후 확정.
+
+### ⑤ 서버 DB 연결 (Neon · 2026-11-06 **연결 완료**, 앱은 아직 미사용)
+- **Neon(Postgres 18.6)** 을 Vercel Marketplace로 연결했습니다(`career-intelligence-db`, Free, `iad1`, 로그인 기능 `auth=false`). Vercel 서버 함수(`api/`)에서만 접근하고, 브라우저에서 DB에 직접 접속하지 않습니다(연결 문자열이 노출되므로). 연결 시험(`select 1`)만 했고 테이블·데이터는 없습니다.
+- 이 단계는 **연결만** 한 상태이며 앱은 아직 DB를 쓰지 않습니다. 따라서 "사용자 데이터는 브라우저(IndexedDB)에만 저장"하는 현재 구조는 변하지 않습니다. 실제 저장(계정·동기화)을 시작하기 전에 이 문서와 `PRD`·`IDEA`·화면 안내문·개인정보 처리방침의 약속을 먼저 확정합니다.
+- 접근 방식 후보: 서버리스용 드라이버(Neon 공식 서버리스 드라이버 여부는 도입 시점에 공식 문서로 확인), 풀링 연결 문자열 사용. 연결 정보는 환경 변수로만 보관.
+
+### ⑥ 서버 DB 구조 — B 방식(브라우저 암호화) (2026-11-06 · 사용자 수용, 1묶음 SQL 초안 검증 완료·Neon 미적용)
+- **파일**: `docs/drafts/0001_group1_schema.sql` (**로컬 전용 — GitHub에 올리지 않음**, 1묶음 8개 테이블, 로컬 Postgres 엔진 PGlite(PostgreSQL 18.6)에서 37건 검증 통과, **Neon에는 미적용**). 2묶음(기업·공고·분석)·3묶음(적합도·지원 이력)·4묶음(생성 문서)의 구조는 아래 3-2에 정리했고 SQL은 1묶음 적용 후 같은 방식으로 작성.
+- **공개 서비스·계정별 데이터**: 누구나 개인 계정을 만들어 쓰며 로그인은 직접 구현하지 않는 방향으로 서비스 후보를 작은 시험(스파이크)으로 선정(서비스가 안 되면 직접 구현이 대안, `HANDOVER.md`·`DEV_PLAN.md` Phase 7). 서비스를 쓰면 `users.auth_subject`로 연결하고, 이메일·비밀번호는 우리 DB에 두지 않음.
+- **암호화 구조 — 비밀번호 하나(파생 방식, 권장안 승인으로 기록)**: 브라우저가 비밀번호에서 PBKDF2-SHA256(600,000회 이상 — OWASP 권장, 2026-11-06 확인)으로 마스터 키를 만들고 HKDF로 **로그인용 값**과 **열쇠용 값** 둘로 갈라서, 서버(로그인 서비스)에는 로그인용 값만 보냄(진짜 비밀번호와 열쇠는 서버에 가지 않음). 사용자마다 브라우저가 무작위 데이터 키(DEK)를 만들어 열쇠용 값으로 감싸 `user_keys`에 보관하고, 복구 키로 한 번 더 감싼 사본을 둠(복구 키는 가입 때 필수 표시·저장 확인). 서비스가 파생값을 비밀번호로 받아주지 않으면 별도 "데이터 암호 구문" 방식(비밀번호 2개)으로 전환. 로그인 전 salt를 어떻게 조회할지(계정 존재 여부 노출 방지)는 7-2에서 설계. 각 레코드는 AES-256-GCM(nonce 12바이트, AAD=테이블+user_id+id)으로 암호화한 `payload_enc` 한 칸에 사용자가 쓴 내용 전부를 담고, 서버는 `user_id`·id·부모 id·순서·시각·수정 번호(revision)·삭제 표시만 봄.
+- **서버가 알 수 있는 것**: 어떤 사용자가 몇 개의 레코드를 언제 수정했는지, 레코드 크기, 부모-자식 관계(어느 성과가 어느 프로젝트 소속인지). 내용(회사명·제목·본문·날짜·기술 스택·이름·연락처)은 알 수 없음.
+- **격리·삭제**: 기본키 `(user_id, id)`, 자식 테이블의 복합 외래키로 다른 사용자의 부모 지정 불가(로컬 엔진에서 검증). 탈퇴 = `users` 행 삭제 → 전부 연쇄 삭제 + 키 행 삭제로 백업에 남은 암호문도 복호화 불가("키 폐기"). Neon 무료 플랜의 복구 이력은 최대 6시간(공식 플랜 페이지, 2026-11-06 확인) — 그 시간 동안은 삭제 전 암호문이 복구 이력에 남을 수 있으나 키 행도 삭제되므로 복호화할 수 없음.
+- **한계**: 서버 검색·정렬·통계 불가(브라우저에서 복호화 후 처리). AI 호출 순간에는 선택된 내용이 복호화되어 서버 함수를 거쳐 Gemini로 전달됨(저장은 암호화, 전송 순간은 평문). 암호화 코드는 직접 작성해야 하며 실수하면 보안이 약해지므로 별도 검토·시험 필요. 행 단위 접근 규칙(RLS)은 초안에 미포함.
+
+### ⑦ 결정 반영: 동기화·연락처 분리·AI 전송 차단 (2026-11-06 · 구현 전)
+- **동기화(절충안 채택)**: 브라우저(IndexedDB)가 주 저장소이고, 서버 DB는 **암호화된 사본 동기화**. 로그아웃 시 "이 기기 데이터 삭제"(미동기화 변경이 있으면 경고 후 진행). 후속으로 로컬 저장소도 같은 데이터 키로 암호화. 서버는 `revision`(수정 번호)과 `deleted_at`(삭제 표시)로 충돌·삭제를 전달. 보안 비교: B에서는 두 방식 모두 서버에 암호문만 있어 서버 유출 위험은 같고, 차이는 기기에 평문이 남는지(서버가 주이면 메모리에만 둘 수 있어 더 안전하나 오프라인 불가·변경 폭 큼).
+- **이름·연락처 별도 칸**: `profiles.contact_enc`(이름·이메일·전화·주소 + 사용자 지정 가림 단어)와 `profiles.payload_enc`(프로필 본문)를 분리(AAD 다르게). 이력서·자소서·포트폴리오 원문은 저장 전에 연락처 값을 자리표시자(`{{이름}}`·`{{이메일}}`·`{{전화}}`)로 바꿔 저장하고 내보내기 때만 브라우저에서 합성.
+- **AI 전송 차단 3겹**: ① AI 전송 데이터를 만드는 코드를 `buildAiPayload` 한 곳으로 모으고 연락처 칸은 읽지 않음 ② 모든 자유 텍스트에서 연락처 값·가림 단어를 정확 일치(공백·하이픈 변형 포함)로 치환한 뒤 **재검사하여 남아 있으면 전송 중단** ③ 서버 `/api/llm`에 이메일·전화번호 패턴 거부(서버는 이름을 알 수 없어 못 잡음). **현재 코드 상태(2026-11-06 확인)**: `buildMatchInsightPayload`는 프로젝트 제목·기술·성과와 기술 목록만 보내고 프로필 이름은 제외하지만, 자유 텍스트 치환과 서버 안전망은 없음 → ②③은 미구현.
+- **한계**: 이름의 다른 표기(영문·약칭), 학교·회사·프로젝트명 등 간접 식별 정보는 자동으로 가릴 수 없음. 무료 Gemini 티어는 입력이 서비스 개선에 쓰일 수 있으므로(공식 가격 페이지 확인) 실질적 방어는 "전송하지 않는 것". 유료 티어는 사용되지 않는다고 명시됨.
+- **로그인**: 서비스 후보 조사 완료(`HANDOVER.md` 2-7), 최종 선정은 7-1 스파이크 후. 한 비밀번호 방식의 PBKDF2·HKDF는 WebCrypto가 기본 지원(MDN 확인, HTTPS 전용, Argon2는 미지원). 정책(권장안 승인으로 기록): 가입은 이메일, 비밀번호 12자 이상(제 제안값, 공식 기준 미확인), 복구 키 필수 표시·저장 확인. 이메일로 비밀번호를 재설정해도 **옛 데이터는 복구 키 없이는 복호화할 수 없음**.
+
+---
+
+## 3-2. 서버 DB 전체 구조 설계 — B 방식, 4묶음 21개 테이블 (2026-11-06 · 구현 전)
+
+> 1묶음만 SQL 초안이 있고 2~4묶음은 구조 설계 단계입니다(SQL·검증 미작성). 구현하면서 확인된 사실로 고칩니다.
+
+### 공통 규칙
+- **암호화 레코드 테이블의 공통 칸**: `user_id`, `id`(브라우저가 만든 UUID), `payload_enc`, `payload_nonce`(12바이트), `key_version`, `revision`(수정 번호), `created_at`, `updated_at`, `deleted_at`(삭제 표시). 기본키 `(user_id, id)`, 자식은 `(user_id, 부모id)` 복합 외래키.
+- **평문(구조 정보)**: 소유자·id·부모 id·순서·종류 구분값·시각·수정 번호·모델 이름/분석 버전/요금제 선언값(감사용). **암호문(`payload_enc`) 안**: 이름·회사명·제목·본문·날짜·기술 스택·점수·메모·상태 등 사용자 내용.
+- **추가 전용(수정·삭제 불가, 탈퇴·부모 삭제의 연쇄 삭제만 허용)**: `consents`, `company_analyses`, `job_analyses`, `fit_analyses`, `fit_evidence`, `application_snapshots`, 확정(`CONFIRMED`)된 `generated_documents`와 하위. DB 트리거로 강제하는 방안은 구현 시 검증.
+- **근거 참조**: 근거는 (`project_id`/`outcome_id`/`source_document_id`) 평문 참조 + 당시 문장 사본(암호문). 원본이 나중에 수정·삭제돼도 분석·문서가 바뀌지 않도록 참조 외래키는 삭제 시 참조 칸만 비움(PostgreSQL 15 이상의 열 지정 `ON DELETE SET NULL (칸)` 사용 예정 — 구현 시 시험으로 확인).
+- **중복 방지 한계**: 회사명 등이 암호문이라 서버에서 `UNIQUE(user_id, 회사명)`을 걸 수 없음 → 브라우저에서 복호화 후 확인.
+- **요청 처리**: 서버는 세션에서 `user_id`를 정하고 클라이언트가 보낸 `user_id`는 신뢰하지 않음. 모든 질의에 `user_id` 조건을 붙이고, 두 계정으로 서로 안 보이는 시험을 필수로 함.
+
+### 테이블 목록
+| 묶음 | 테이블 | 평문(구조) 칸 | 암호문 안의 내용 | 비고 |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 (초안·검증 완료) | `users`, `user_keys`, `user_settings`, `consents`, `profiles`, `projects`, `project_outcomes`, `source_documents` | 초안 SQL 참고 | 프로필 본문/연락처(별도 칸), 프로젝트, 성과 한 줄, 과거 이력서·자소서·포트폴리오 원문(연락처는 자리표시자) | `docs/drafts/0001_group1_schema.sql` |
+| 2 | `companies` | — | 기업명, 산업, 웹사이트, 메모 | 사용자별 보관 |
+| | `company_sources` | `company_id`, `status`(MANUAL/FETCHED/FAILED), `collected_at` | URL, 제목, 발췌, 실패 사유 | 원문 전체 저장 금지(발췌·요약·링크) |
+| | `company_analyses` | `company_id`, `model`, `tier_declared`, `analysis_version`, `created_at` | 사업·기술·문화·최근 소식 요약 | 추가 전용, 버전 |
+| | `job_postings` | `company_id`, `parsed_by`(RULE/AI), `parsed_at` | 직무명, 산업, 공고 URL, **공고 원문 전체** | 원문 보존 필수 |
+| | `job_requirements` | `job_posting_id`, `section`(RESPONSIBILITY/QUALIFICATION/PREFERRED), `position` | 요구사항 문장 | 근거 연결의 기준 행 |
+| | `job_analyses` | `job_posting_id`, `model`, `tier_declared`, `analysis_version`, `created_at` | 핵심 키워드, 요구 기술, 연차, 업무 요약 | 추가 전용 |
+| 3 | `fit_analyses` | `job_posting_id`, `company_analysis_id`(선택), `model`(규칙 기반이면 비움), `analysis_version`, `analyzed_at` | 충족도 점수, 요약 | 추가 전용. 점수는 합격 확률이 아님 |
+| | `fit_evidence` | `fit_analysis_id`, `level`(DIRECT/INDIRECT/GAP), `requirement_id`/`project_id`/`outcome_id`/`source_document_id`(참조, 선택) | 요구사항 문장 사본, 근거 인용문 사본, 설명, 보완 가이드 | 추가 전용 |
+| | `applications` | `job_posting_id`(선택) | 회사·직무·산업·**상태**(READY/SUBMITTED/INTERVIEW/ACCEPTED/REJECTED)·지원일·메모 | 지원 사실 자체가 민감하므로 상태도 암호화 |
+| | `application_snapshots` | `application_id`, `snapshot_at` | 당시 공고, 제출 자료, 분석 결과 | 수정·삭제 불가. 한 행 최대 크기 상향 필요(구현 시 결정) |
+| 4 | `generated_documents` | `job_posting_id`, `application_id`(선택), `kind`(RESUME/COVER_LETTER/PORTFOLIO), `version`, `status`(DRAFT/CONFIRMED), `model`, `tier_declared`, `analysis_version`, `fit_analysis_id`, `company_analysis_id`, `generated_at`, `confirmed_at` | 제목 | `UNIQUE(user_id, job_posting_id, kind, version)`, 확정 후 수정 불가 |
+| | `document_sections` | `document_id`, `position` | 소제목, 본문(이력서·자소서=문단, 포트폴리오=슬라이드 1장) | |
+| | `section_evidence` | `section_id`, `project_id`/`outcome_id`/`source_document_id`(참조) | 근거 인용문 사본 | 확정 후 수정 불가 |
+
+### 현재 브라우저 DB와의 대응
+| 현재/계획 (IndexedDB) | 서버 테이블 |
+| :--- | :--- |
+| `profiles` | `profiles` (+ 연락처 전용 칸) |
+| `projects` | `projects` + `project_outcomes` (성과 배열을 행으로 분리) |
+| `jobDescriptions` | `job_postings` + `job_requirements` |
+| `analysisResults` | `fit_analyses` + `fit_evidence` (직접/간접/공백 배열을 행으로 통합) |
+| `applications` | `applications` + `application_snapshots` |
+| `notionConfigs` | `user_settings`(암호문, 노션 토큰 제외) |
+| `sourceDocuments`(계획) | `source_documents` |
+| `companyProfiles`(계획) | `companies` + `company_sources` + `company_analyses` |
+| `generatedDocuments`(계획) | `generated_documents` + `document_sections` + `section_evidence` |
+- 알려진 어긋남: 현재 로컬 `AnalysisResult` 타입에는 `analysisVersion`이 없어 `AGENTS.md` 6절 원칙과 어긋남 → 서버 스키마에는 포함, 로컬 타입은 `fit_analyses` 동기화 구현 전에 맞춤.
+
+### 동기화·API (가칭, 구현 전)
+- 로그인 관련 경로는 서비스 선정 후 확정. 동기화는 "변경분 올리기/가져오기"(수정 번호·삭제 표시 기준 충돌 처리)와 "감싼 키 조회·갱신"으로 구성하며 모든 요청은 세션 확인 후 처리. **Vercel 무료(Hobby) 제약 반영(공식 문서 확인)**: `api/` 파일 1개가 함수 1개이고 Hobby는 배포당 12개 한도(현재 4개)이므로 새 경로는 파일을 늘리지 않고 `server/nodeAdapter.ts`의 라우트 표에 합치며, 요청/응답 본문 한도는 4.5MB라 레코드는 한 건씩 전송하고 공통 60KB 가드는 동기화 경로에서만 엔드포인트별로 분리. 정리 작업은 하루 1회 크론(±59분 오차) 또는 요청 중 지연 정리.
+- 브라우저가 주 저장소이므로 서버 장애 시에도 앱은 계속 동작. 로그아웃 시 이 기기 데이터 삭제(미동기화 변경 경고). 후속으로 로컬 저장소도 같은 데이터 키로 암호화.
+
+---
+
 ## 4. 디렉터리 및 코드 구조 (`src/`)
 
 ```text
@@ -225,9 +383,12 @@ src/
 │   ├── notion/                  # notionAdapter.ts(스키마 감지·매핑·변환) + NotionAdapterPanel
 │   ├── backup/                  # backupService.ts(내보내기·검증·복원) + BackupPanel
 │   └── ai/                      # aiClient.ts(/api 호출·동의·접근 코드), AiAssist(버튼 3종), AiSettingsPanel
+│   ├── company/                 # (계획·미구현) 기업 자료 입력·요약 패널, 출처 기록
+│   └── documents/               # (계획·미구현) 과거 자료 입력, 문서 생성·검수·버전, 내보내기
 ├── types/                       # profile.ts · analysis.ts · application.ts · notion.ts
 ├── App.tsx                      # 탭 기반 셸 (useState, URL 라우팅 없음)
 ├── main.tsx
+├── vite-env.d.ts                # Vite 환경 타입 선언 (import.meta.env.DEV 등)
 └── index.css
 
 api/                             # Vercel 서버리스 함수 (얇은 래퍼)
@@ -245,6 +406,7 @@ tests/                           # Vitest: db · jdParser · matchingEngine · a
                                  #         notionAdapter · backup · server  (총 69개)
 vite.config.ts                   # 개발 서버에서 /api/* 를 위 server/ 핸들러로 처리
 vercel.json                      # 배포 보안 헤더 (CSP, X-Frame-Options, Referrer-Policy, HSTS, /api 캐시 금지)
+public/favicon.svg               # 파비콘 (앱 로고: 인디고 + Sparkles). public/ 의 나머지는 v0 템플릿 잔여 이미지
 ```
 
 > 위 트리는 **현재 구현 기준**입니다(2026-11-04). 초기 설계안에 있던 `components/`, `services/`, `utils/`, `dashboard/`, 별도 `schema.ts`는 만들지 않았고, 서비스 로직은 각 `features/` 폴더 안에 함께 둡니다. 대시보드는 아직 `App.tsx` 내부의 요약 화면입니다.
@@ -260,6 +422,7 @@ vercel.json                      # 배포 보안 헤더 (CSP, X-Frame-Options, R
    - 실시간: 브라우저(토큰·DB ID 입력) ➔ `/api/notion`(검증 후 노션 API 중계, 미저장) ➔ 응답 JSON ➔ 위와 동일한 파서·매핑 흐름.
 4. **AI 모델 선택**: 사용자가 고른 모델 > 운영자 `GEMINI_MODEL` > 자동. 자동은 키로 `models`를 조회해 Flash 안정판 최신순으로 정렬하고(TTS·이미지 등 제외), 403/404/5xx/시간 초과면 다음 후보로 넘어간다(최대 6개, 전체 40초 예산, 시도당 15초). 실패한 모델은 같은 서버 인스턴스 메모리에서 10분간 후순위로 밀린다(서버 재시작·인스턴스 교체 시 초기화). 응답에는 사용된 `model`과 먼저 실패해 건너뛴 `attempts`가 포함된다. 사용자가 직접 고른 모델은 재시도하지 않는다.
 5. **AI 분석 흐름** (사용자가 버튼을 눌렀을 때만, 동의 후): 브라우저가 필요한 최소 데이터 구성(이름 제외) ➔ `/api/llm`(가드 통과 → 프롬프트 구성 → Gemini 호출) ➔ 서버가 JSON 응답을 검증(스키마, 입력에 없던 요구사항·수치 제거) ➔ UI 표시. **AI 결과는 참고용이며 DB·분석 스냅샷에 저장하지 않고 객관적 충족도 점수를 바꾸지 않는다.**
+6. **맞춤 문서 생성 흐름 (2026-11-06 승인 · 구현 전, 상세는 3-1)**: ① 브라우저가 공고·기업 자료·과거 자료를 모으고 관련 근거를 선별(60KB 제한 대응, 이름·연락처 제거) ➔ ② `/api/llm`을 단계별로 호출(`company-summary` → `fit-analysis` → `generate-*`) ➔ ③ 서버가 스키마·수치·근거 ID를 검증해 근거 없는 문장 폐기 ➔ ④ 브라우저의 검수 화면에서 원문과 비교·수정 ➔ ⑤ 사용자가 저장하면 `GeneratedDocument` 버전으로 IndexedDB에 저장 ➔ ⑥ 내보내기 시 이름·연락처를 브라우저에서 합성해 PDF/DOCX/PPTX 생성. 서버는 계속 무상태.
 
 ---
 

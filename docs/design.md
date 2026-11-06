@@ -420,6 +420,8 @@ font-bold text-lg text-slate-900 tracking-tight
 text-xs text-slate-500
 ```
 
+**파비콘 (2026-11-05)**: `public/favicon.svg` — 위 로고 블록과 같은 구성(인디고 그라디언트 `#4F46E5` → `#6366F1`, 우상향, 둥근 모서리 약 30% + 흰색 Sparkles). Sparkles 도형은 lucide-react(ISC)에서 가져옴. `index.html`의 `<link rel="icon" href="/favicon.svg">`로 연결. 라이브 반영은 배포 후.
+
 ### ③ 탭 버튼 (Active / Inactive)
 
 ```
@@ -480,6 +482,7 @@ shadow-sm transition-colors cursor-pointer
 
 개발 및 테스트 목적으로 하단에 고정된 DB 컨트롤 바입니다.  
 **프로덕션 배포 시 제거하거나 `isDev` 조건부 렌더링으로 숨깁니다.**
+> ✅ **구현 (2026-11-05)**: `import.meta.env.DEV` 조건으로 개발 서버에서만 표시되고 프로덕션 빌드에서는 번들에서도 제거됩니다. 단, 이 수정은 아직 라이브(Vercel)에 반영되지 않아 라이브에서는 반영 전까지 바가 보입니다(`docs/DEPLOY.md` 알려진 결함 ②). 빈 목록일 때만 보이는 온보딩용 "샘플 불러오기" 버튼은 이 바와 별개이며 프로덕션에 남아 있습니다.
 
 ```
 // 위치: 메인 콘텐츠 최하단, 푸터 바로 위
