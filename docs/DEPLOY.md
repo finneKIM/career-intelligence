@@ -31,8 +31,8 @@
 | 노션 프록시 | 토큰 없이 호출 → 400 (외부 호출 없음) |
 | 키 노출 | 배포된 JS·CSS에서 `AIza…` 패턴 0건, `GEMINI_API_KEY`·`APP_ACCESS_CODE` 문자열 0건 |
 | 외부 리소스 | JS·CSS에서 CSP가 막을 외부 로딩(폰트·CDN 등) 없음(발견된 주소는 링크·네임스페이스) |
-| 알려진 결함 ① | `/vite.svg`(파비콘) 404 — `index.html`이 없는 파일을 가리킴. 동작에는 영향 없음. → **로컬 코드는 수정함(2026-11-05)**: `public/favicon.svg`(앱 헤더 로고와 같은 인디고+Sparkles)로 교체, `index.html` 링크 수정. 라이브 미반영 — 반영 후 `/favicon.svg`가 200인지, 브라우저 탭 아이콘이 보이는지 확인할 것(캐시 시 Ctrl+Shift+R). 참고: `public/icon.svg` 등 v0 템플릿 이미지 9개는 사용하지 않지만 라이브에서 그대로 서빙됨 |
-| 알려진 결함 ② | **개발용 하단 컨트롤 바가 라이브 서버에도 그대로 표시됨**(`src/App.tsx`에 개발 모드 조건 없음, 배포 번들에 문구 확인). "+ 샘플 데이터 채우기"와 "비우기"(확인 창 후 프로젝트 전체 삭제) 버튼이 방문자에게 보임. 영향은 방문자 본인 브라우저 데이터에 한정(다른 사용자·서버 데이터 무관)이나 노션에서 가져온 프로젝트를 실수로 지울 수 있음. `design.md` 13절의 "프로덕션에서는 숨김" 원칙과 불일치 → **로컬 코드는 수정함(2026-11-05, `import.meta.env.DEV` 조건: 개발 서버에서만 표시, 프로덕션 번들에서 제거 확인). 라이브에는 아직 미반영** — 커밋·푸시하면 Vercel이 자동 배포하여 반영됨(사용자 지시 대기). 반영 후 `/assets/index-*.js`에서 "샘플 데이터 채우기" 문구 0건인지 재확인할 것 |
+| 알려진 결함 ①(2026-11-06 해결) | `/vite.svg`(파비콘) 404 — `index.html`이 없는 파일을 가리킴. 동작에는 영향 없음. → **로컬 코드는 수정함(2026-11-05)**: `public/favicon.svg`(앱 헤더 로고와 같은 인디고+Sparkles)로 교체, `index.html` 링크 수정. 라이브 미반영 — 반영 후 `/favicon.svg`가 200인지, 브라우저 탭 아이콘이 보이는지 확인할 것(캐시 시 Ctrl+Shift+R). 참고: `public/icon.svg` 등 v0 템플릿 이미지 9개는 사용하지 않지만 라이브에서 그대로 서빙됨 |
+| 알려진 결함 ②(2026-11-06 해결: 푸시 후 라이브 번들에서 문구 0건) | **개발용 하단 컨트롤 바가 라이브 서버에도 그대로 표시됨**(`src/App.tsx`에 개발 모드 조건 없음, 배포 번들에 문구 확인). "+ 샘플 데이터 채우기"와 "비우기"(확인 창 후 프로젝트 전체 삭제) 버튼이 방문자에게 보임. 영향은 방문자 본인 브라우저 데이터에 한정(다른 사용자·서버 데이터 무관)이나 노션에서 가져온 프로젝트를 실수로 지울 수 있음. `design.md` 13절의 "프로덕션에서는 숨김" 원칙과 불일치 → **로컬 코드는 수정함(2026-11-05, `import.meta.env.DEV` 조건: 개발 서버에서만 표시, 프로덕션 번들에서 제거 확인). 라이브에는 아직 미반영** — 커밋·푸시하면 Vercel이 자동 배포하여 반영됨(사용자 지시 대기). 반영 후 `/assets/index-*.js`에서 "샘플 데이터 채우기" 문구 0건인지 재확인할 것 |
 | **미확인** | 브라우저에서 실제 화면이 깨지지 않는지(CSP 위반 여부), 배포본에서 방문자 키로 AI 실호출, 배포본에서 노션 실호출, 응답 시간, Vercel 프로젝트의 Fluid compute·Function Max Duration 설정 |
 
 
@@ -46,7 +46,7 @@
 - **`VITE_` 접두사 금지(비밀 키)**: `VITE_` 변수는 빌드된 JS 번들에 포함되어 방문자에게 노출됩니다. 비밀 키는 접두사 없이 이름을 짓고 Vercel 서버리스 함수(`/api/*`)에서만 읽습니다.
 - **커밋 전 점검**: `git diff --cached`로 키 문자열이 없는지 확인합니다. 실수로 커밋/푸시한 키는 삭제가 아니라 **즉시 폐기(재발급)** 해야 합니다 (git 이력에 남기 때문).
 - 노션 토큰 등 사용자 입력 키는 백업 JSON에서도 제외됩니다 (`backupService.ts`).
-- **개인 데이터(노션에서 가져온 프로젝트, 공고, 지원 이력, 백업 JSON)는 저장소에 없습니다.** 앱 데이터는 (현재) 사용자 브라우저의 IndexedDB에만 있습니다(계정 기능 구현 후에는 암호화된 사본만 Neon DB에 동기화 — 구현 전). 백업 파일(`career-intel-backup-날짜.json`)·CSV 등을 프로젝트 폴더에 저장해도 올라가지 않도록 `.gitignore`가 막지만, 이 파일들은 프로젝트 폴더 밖(예: 문서 폴더)에 보관하는 것을 권장합니다. 푸시 전에는 `git status`와 `git diff --cached --name-only`로 올라갈 파일 목록을 확인하세요.
+- **개인 데이터(노션에서 가져온 프로젝트, 공고, 지원 이력, 백업 JSON)는 저장소에 없습니다.** 앱 데이터는 (현재) 사용자 브라우저의 IndexedDB에만 있습니다(계정 기능을 쓰는 사용자는 암호화된 사본만 Neon DB에 동기화 — 구현 완료·배포 전). 백업 파일(`career-intel-backup-날짜.json`)·CSV 등을 프로젝트 폴더에 저장해도 올라가지 않도록 `.gitignore`가 막지만, 이 파일들은 프로젝트 폴더 밖(예: 문서 폴더)에 보관하는 것을 권장합니다. 푸시 전에는 `git status`와 `git diff --cached --name-only`로 올라갈 파일 목록을 확인하세요.
 
 ### 서버리스 API (LLM · 노션) — 방문자별 키 방식 (BYOK)
 
@@ -81,17 +81,17 @@
 - 노션 쪽 준비(방문자 안내): 내부 통합을 만든 뒤 **해당 DB에서 "연결"로 그 통합을 추가**해야 합니다(안 하면 404). 권한은 "콘텐츠 읽기"만으로 충분합니다.
 - 로컬 개발: `npm run dev`가 같은 핸들러로 `/api/*`를 처리합니다.
 
-### Neon DB 연결 (사용자 결정 2026-11-06 · 연결 완료, 앱은 아직 미사용)
+### Neon DB 연결 (사용자 결정 2026-11-06 · 연결 완료, 스키마 적용 완료 — 앱은 계정 기능에서 사용, 배포 전)
 
 **연결 결과 (2026-11-06, Vercel CLI로 진행)**
 | 항목 | 내용 |
 | :--- | :--- |
 | 리소스 | `career-intelligence-db` (Neon, 상태 Available), 프로젝트 `career-intelligence`(스코프 `finnekims-projects`, Hobby)에 연결 |
 | 플랜·지역 | `free_v3`(무료), `iad1`(미국 동부, 라이브 함수와 같은 지역) |
-| 옵션 | `auth=false`(Neon의 앱 사용자 로그인 기능은 만들지 않음 — 계정 설계 미확정), `realtime=false`, 환경 Production·Preview·Development 전부 |
+| 옵션 | `auth=false`(Neon 관리형 로그인은 쓰지 않음 — Better Auth를 직접 설치해 사용), `realtime=false`, 환경 Production·Preview·Development 전부 |
 | 주입된 환경 변수 (이름만, 16개) | `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, `POSTGRES_URL_NO_SSL`, `POSTGRES_PRISMA_URL`, `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DATABASE`, `PGHOST`, `PGHOST_UNPOOLED`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `NEON_PROJECT_ID` |
 | 연결 시험 | 로컬에서 `vercel env run`으로 비밀 값을 파일에 쓰지 않고 주입해 `select 1` 수준 질의만 전송: HTTP 200, 데이터베이스 `neondb`, Postgres 18.6, 737ms(절전 후 첫 응답 포함 가능). 데이터 읽기·쓰기 없음 |
-| 앱 반영 | **아직 없음.** 앱 코드가 DB를 읽지 않으며, 환경 변수는 새 배포부터 적용되므로 라이브(기존 배포)에는 반영되지 않음. 현재 프로덕션 배포는 연결 이전 배포 |
+| 앱 반영 | 마이그레이션 0001~0003 적용(테이블 18개 + `schema_migrations`), 앱은 `DATABASE_URL`과 `BETTER_AUTH_SECRET`이 모두 있을 때만 계정 기능에서 DB를 사용. 현재 라이브(Vercel) 프로덕션에는 `BETTER_AUTH_SECRET`이 없어 계정 기능이 꺼져 있고 새 코드도 아직 배포 전 |
 | 로컬 | `.env.local`에는 `DATABASE_URL`을 넣지 않음(`--no-env-pull`). 필요하면 `vercel env run -- <명령>`으로 실행 중에만 주입. `vercel link`가 `.env.local`에 `VERCEL_OIDC_TOKEN` 한 줄만 추가함(기존 값 변화 없음, Git 무시) |
 
 **CLI 우회 방법 기록**: 기본 `vercel` 명령은 PC 이름의 한글 때문에 로그인 불가(`ByteString` 오류). 해결: `npx vercel`이 설치하는 JS 버전 CLI(`@vercel/cli-support/dist/vc.js`)를 Node로 직접 실행하면서, 실행 중에만 `os.hostname()`을 영문으로 돌려주는 임시 파일을 `--require`로 로드(시스템 설정 변경 없음, 임시 파일은 저장소 밖). 정식 해결은 PC 이름을 영문으로 바꾸는 것.
@@ -105,5 +105,14 @@
 - **환경 변수 주의**: 연결 후 새로 배포해야 적용됨(기존 배포에는 반영되지 않음, Vercel 문서). 변수 이름은 연결 후 CLI로 확인함(위 표, `DATABASE_URL` 포함 16개). 연결 문자열은 비밀 값이므로 `VITE_` 접두사 금지, 서버 함수에서만 읽기, 채팅·GitHub에 노출 금지. 서버리스에서는 풀링(pooled) 연결 문자열 권장(Vercel 문서).
 - **로컬 파일 보호**: `vercel env pull`(및 `vercel install`)이 `.env.local`을 덮어쓸 수 있어 `.env.local.backup-20261106`을 만들어 둠(Git 무시 대상, 원본과 동일 확인). 로컬 개발용 연결 문자열은 `.env.local`에 넣지 않고 `vercel env run -- <명령>`으로 실행 중에만 주입(2026-11-06 연결 시험에서 사용, 값은 출력하지 않음).
 - **Neon 무료 범위(공식 가격·플랜 페이지 2026-11-06)**: 프로젝트당 1GB, 월 100 CU-hours, 데이터 전송 월 5GB, 브랜치 10개, 복구 이력 최대 6시간, 5분 미사용 시 자동 절전(다음 요청에서 깨어남). 한도 소진 시 컴퓨트가 정지되고 데이터는 삭제되지 않음.
-- **Vercel 무료(Hobby) 한도 요약(공식 문서 2026-11-06)**: 배포당 함수 12개(`api/` 파일 1개=함수 1개, 현재 4개), 요청/응답 본문 4.5MB, 실행 300초·메모리 2GB, 크론 하루 1회(시각 오차 ±59분), 하루 배포 100회, 동시 빌드 1개, 환경 변수 합계 64KB. Hobby는 비상업적 개인 용도 전용(광고·결제 등은 Pro 필요). 사용자 결정: 무료 플랜만으로 되는 구조(`DB_IMPLEMENTATION_PLAN.md` 3-1).
+- **Vercel 무료(Hobby) 한도 요약(공식 문서 2026-11-06)**: 배포당 함수 12개(`api/` 파일 1개=함수 1개, 현재 `account`·`health`·`llm`·`models`·`notion` 5개 — 로컬 코드 기준, 라이브는 배포 전이라 4개), 요청/응답 본문 4.5MB, 실행 300초·메모리 2GB, 크론 하루 1회(시각 오차 ±59분), 하루 배포 100회, 동시 빌드 1개, 환경 변수 합계 64KB. Hobby는 비상업적 개인 용도 전용(광고·결제 등은 Pro 필요). 사용자 결정: 무료 플랜만으로 되는 구조(`DB_IMPLEMENTATION_PLAN.md` 3-1).
 - **개발/운영 DB 공용(2026-11-06 사용자 결정)**: 현재 Neon 변수 16개가 Production·Preview·Development에 모두 연결되어 하나의 DB를 공용으로 씀. 안전 규칙은 `DB_IMPLEMENTATION_PLAN.md` G1(가짜 데이터만, `main`만 푸시해 Preview 배포 방지, 공개 전 재평가).
+
+## 계정·동기화 기능 배포 전 점검표 (2026-11-06 작성, 아직 배포하지 않음)
+1. **환경 변수**: `BETTER_AUTH_SECRET`(무작위 32바이트 이상)을 Vercel 프로젝트에 등록해야 계정 기능이 켜집니다. 없으면 `/api/health`의 `accounts`가 `false`이고 계정 패널은 "아직 켜지지 않음"으로 보이며, 앱은 지금처럼 로컬로만 동작합니다(안전한 기본값). `DATABASE_URL`은 Neon 연동이 이미 주입함.
+2. **DB**: 마이그레이션 0001~0003은 공용 Neon DB에 이미 적용됨(`scripts/db-migrate.ts`, 체크섬 기록). 새 마이그레이션은 데이터가 생긴 뒤에는 "앞으로 가는 수정" 파일만 추가하고 DOWN은 쓰지 않습니다.
+3. **함수 개수**: `api/` 6개(account·health·llm·models·notion·read-url) / 무료 한도 12개. `/api/account/*`는 `vercel.json` rewrite(`/api/account?p=:path*`)로 `api/account.ts` 하나가 처리합니다 — 라이브에서의 동작은 **배포 후 확인 필요**.
+4. **배포 직전 점검**: `vercel env run -- npx vite-node scripts/release-check.ts`(읽기 전용, 8항목).
+5. **공용 DB 방침(G1)**: 공개 전 사용자 데이터 0건 확인(위 점검에 포함), 공개 후에는 시험을 로컬 가짜 DB(PGlite)로만 하고 실제 DB에는 시험 계정을 만들지 않거나 시험 후 삭제.
+6. **공개(기능 켜기) 전 필수**: 개인정보 처리방침 법률 검토·확정(`docs/PRIVACY_POLICY_DRAFT.md`), Vercel Hobby 비상업 조건 확인, 새 화면 직접 확인, 한도(Neon CU-hours·전송량, Vercel 배포 횟수) 점검 방법 정하기.
+7. **롤백**: Vercel 대시보드에서 이전 배포로 되돌리기(일반 기능, 이번에 문서로 확인하지 않음). DB 변경은 되돌리지 않고 호환되는 수정 마이그레이션으로 처리.
